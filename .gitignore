@@ -1,0 +1,4 @@
+node_modules/
+*.log
+.relation-check.json
+.DS_Store

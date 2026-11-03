@@ -1,0 +1,21 @@
+# dsh-relation-check 的 bundle patch
+#
+#   insert: 往配置树里加一行 entry
+#   id:     唯一标识
+#   name:   'dsh-relation-check' 解析到本包入口 lib/index.js
+#   config: 原样传给 apply(root, config)
+#
+# 这里故意不带 config：diaryDir 因人而异，必须由使用者自己填。
+# 在你的 profile 的 cordis.patch.yml 里加：
+#
+#   - insert:
+#       - id: relation-check
+#         name: 'dsh-relation-check'
+#         config:
+#           diaryDir: '/path/to/your/diary'
+#
+# 不填 diaryDir 插件会打印一行错误然后不注册，不会影响 DSH 启动。
+
+- insert:
+    - id: relation-check
+      name: 'dsh-relation-check'

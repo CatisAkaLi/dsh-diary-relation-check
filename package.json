@@ -1,0 +1,54 @@
+{
+  "name": "dsh-relation-check",
+  "version": "0.5.0",
+  "description": "日记更新时，在系统提示里提醒模型认真判断一次某个关系问题，并留下判断依据",
+  "type": "module",
+  "main": "lib/index.js",
+  "exports": {
+    ".": {
+      "default": "./lib/index.js"
+    },
+    "./package.json": "./package.json"
+  },
+  "files": [
+    "lib",
+    "dsh-plugin.json",
+    "cordis.patch.yml",
+    "README.md",
+    "LICENSE"
+  ],
+  "dsh": {
+    "bundle": {
+      "patch": "./cordis.patch.yml"
+    }
+  },
+  "scripts": {
+    "test": "node --test test/*.test.mjs"
+  },
+  "os": [
+    "linux",
+    "darwin",
+    "win32"
+  ],
+  "license": "MIT",
+  "author": "CatisAkaLi",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/CatisAkaLi/dsh-relation-check.git"
+  },
+  "homepage": "https://github.com/CatisAkaLi/dsh-relation-check#readme",
+  "bugs": {
+    "url": "https://github.com/CatisAkaLi/dsh-relation-check/issues"
+  },
+  "engines": {
+    "node": ">=20"
+  },
+  "keywords": [
+    "dsh",
+    "dsh-plugin",
+    "中文",
+    "日记",
+    "关系",
+    "memory"
+  ]
+}
