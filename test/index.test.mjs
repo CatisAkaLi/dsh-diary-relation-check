@@ -1,21 +1,32 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { mkdtempSync, readFileSync, writeFileSync, existsSync, rmSync, utimesSync } from 'node:fs'
+import {
+  mkdtempSync,
+  mkdirSync,
+  readFileSync,
+  writeFileSync,
+  existsSync,
+  rmSync,
+  utimesSync,
+} from 'node:fs'
 import { tmpdir } from 'node:os'
-import { join, parse } from 'node:path'
+import { join, parse, dirname } from 'node:path'
 
 import {
   DEFAULTS,
+  acceptsSession,
   buildDiskMissingHint,
   buildReminder,
   describeDiaryPattern,
   detectDiaryFormat,
   ensureDiary,
   ensureMemory,
+  ensureStateDir,
   latestDiary,
   listDiaries,
   memoryGuide,
   normalizeConfig,
+  sessionIdOf,
   today,
   volumeAvailable,
   volumeRootOf,
@@ -41,15 +52,46 @@ test('normalizeConfig 缺 diaryDir 时抛错', () => {
   assert.throws(() => normalizeConfig({}), /diaryDir/)
 })
 
-test('normalizeConfig 默认状态文件放在日记目录里', () => {
-  const dir = makeDir()
+test('normalizeConfig 默认状态文件放在日记目录外面', () => {
+  const base = makeDir()
+  const dir = join(base, '记忆')
   try {
+    mkdirSync(dir, { recursive: true })
     const cfg = normalizeConfig({ diaryDir: dir })
-    assert.equal(cfg.stateFile, join(dir, '.relation-check.json'))
+    assert.equal(cfg.stateFile, join(base, '.dsh-diary-relation-check', 'state.json'))
+    assert.ok(!cfg.stateFile.startsWith(dir), '状态文件不能落在日记目录里面')
     assert.equal(cfg.person, DEFAULTS.person)
     assert.equal(cfg.question, DEFAULTS.question)
   } finally {
+    rmSync(base, { recursive: true, force: true })
+  }
+})
+
+test('显式配 stateFile 时按配的来', () => {
+  const dir = makeDir()
+  try {
+    const explicit = join(dir, 'state', 'r.json')
+    const cfg = normalizeConfig({ diaryDir: dir, stateFile: explicit })
+    assert.equal(cfg.stateFile, explicit)
+  } finally {
     rmSync(dir, { recursive: true, force: true })
+  }
+})
+
+test('ensureStateDir 只建目录，不建文件', () => {
+  const base = makeDir()
+  const dir = join(base, '记忆')
+  try {
+    mkdirSync(dir, { recursive: true })
+    const cfg = normalizeConfig({ diaryDir: dir })
+    assert.equal(existsSync(dirname(cfg.stateFile)), false, '一开始目录不存在')
+
+    const err = ensureStateDir(cfg)
+    assert.equal(err, '')
+    assert.equal(existsSync(dirname(cfg.stateFile)), true)
+    assert.equal(existsSync(cfg.stateFile), false, '不该顺手建一个空 json')
+  } finally {
+    rmSync(base, { recursive: true, force: true })
   }
 })
 
@@ -93,10 +135,10 @@ test('日记比上次判断新时给出提醒，判断后安静', () => {
   try {
     const diary = join(dir, '2026-11-03.md')
     writeFileSync(diary, '# 日记')
+    const state = join(dir, 'state.json')
+    const cfg = normalizeConfig({ diaryDir: dir, stateFile: state })
 
-    const cfg = normalizeConfig({ diaryDir: dir })
-
-    const first = __selfCheck({ diaryDir: dir })
+    const first = __selfCheck({ diaryDir: dir, stateFile: state })
     assert.ok(first.text.length > 0, '第一次应该提醒')
     assert.match(first.text, /2026-11-03\.md/)
 
@@ -106,7 +148,7 @@ test('日记比上次判断新时给出提醒，判断后安静', () => {
       JSON.stringify({ lastCheckMs: Date.now() + 1000, verdict: 'not-yet', reason: '测试' }),
     )
 
-    const second = __selfCheck({ diaryDir: dir })
+    const second = __selfCheck({ diaryDir: dir, stateFile: state })
     assert.equal(second.text, '', '判断后应该安静')
   } finally {
     rmSync(dir, { recursive: true, force: true })
@@ -119,14 +161,15 @@ test('状态文件带 BOM 也能读', () => {
     const diary = join(dir, '2026-11-03.md')
     writeFileSync(diary, '# 日记')
 
-    const cfg = normalizeConfig({ diaryDir: dir })
+    const state = join(dir, 'state.json')
+    const cfg = normalizeConfig({ diaryDir: dir, stateFile: state })
     writeFileSync(
       cfg.stateFile,
       '\uFEFF' + JSON.stringify({ lastCheckMs: Date.now() + 1000 }),
       'utf8',
     )
 
-    const out = __selfCheck({ diaryDir: dir })
+    const out = __selfCheck({ diaryDir: dir, stateFile: state })
     assert.equal(out.text, '', '带 BOM 也能正确读到 lastCheckMs')
     assert.ok(out.lastCheckMs > 0)
   } finally {
@@ -555,7 +598,8 @@ test('不是最新那篇更新了，也会触发提醒', () => {
     utimesSync(newer, past, past)
 
     const pattern = '^\\d{4}-\\d{2}-\\d{2}-.*\\.md$'
-    const cfg = normalizeConfig({ diaryDir: dir, diaryPattern: pattern })
+    const state = join(dir, 'state.json')
+    const cfg = normalizeConfig({ diaryDir: dir, diaryPattern: pattern, stateFile: state })
 
     // 判断时间卡在两篇之后、现在之前 → 两篇都不算新，应该安静
     const between = Date.now() - 1_800_000
@@ -564,14 +608,14 @@ test('不是最新那篇更新了，也会触发提醒', () => {
       JSON.stringify({ lastCheckMs: between, verdict: 'not-yet', reason: 'x' }),
     )
 
-    const quiet = __selfCheck({ diaryDir: dir, diaryPattern: pattern })
+    const quiet = __selfCheck({ diaryDir: dir, diaryPattern: pattern, stateFile: state })
     assert.equal(quiet.text, '', '都不新时安静')
 
     // 把旧的那篇 mtime 顶到未来 → 它虽然日期早，但更新过
     const future = new Date(Date.now() + 60_000)
     utimesSync(older, future, future)
 
-    const again = __selfCheck({ diaryDir: dir, diaryPattern: pattern })
+    const again = __selfCheck({ diaryDir: dir, diaryPattern: pattern, stateFile: state })
 
     assert.ok(again.text.length > 0, '旧的那篇更新了也要提醒')
     assert.match(again.text, /2026-11-01-日记\.md.*← 有更新/)
@@ -644,6 +688,62 @@ test('探测中文日期命名', () => {
     assert.ok(r, '应该探测到中文日期格式')
     assert.equal(r.count, 2)
     assert.equal(r.pattern, '^\\d{4}年\\d{1,2}月\\d{1,2}日[^\\\\/]*\\.md$')
+  } finally {
+    rmSync(dir, { recursive: true, force: true })
+  }
+})
+
+// === 只在指定会话回答 ===
+
+test('sessionIdOf 从 context 里取会话 id', () => {
+  assert.equal(sessionIdOf({ agent: { session: { id: 'session-a' } } }), 'session-a')
+  assert.equal(sessionIdOf({ agent: { id: 'session-b' } }), 'session-b')
+  assert.equal(sessionIdOf({}), '')
+  assert.equal(sessionIdOf(undefined), '')
+})
+
+test('没配 sessionId 时所有会话都回答', () => {
+  const dir = makeDir()
+  try {
+    const cfg = normalizeConfig({ diaryDir: dir })
+    assert.equal(cfg.sessionId, '')
+    assert.equal(acceptsSession(cfg, { agent: { session: { id: 'any' } } }), true)
+    assert.equal(acceptsSession(cfg, undefined), true)
+  } finally {
+    rmSync(dir, { recursive: true, force: true })
+  }
+})
+
+test('配了 sessionId 时只认那一个会话', () => {
+  const dir = makeDir()
+  try {
+    const cfg = normalizeConfig({ diaryDir: dir, sessionId: 'session-a' })
+    assert.equal(acceptsSession(cfg, { agent: { session: { id: 'session-a' } } }), true)
+    assert.equal(acceptsSession(cfg, { agent: { session: { id: 'session-b' } } }), false)
+    assert.equal(acceptsSession(cfg, {}), false, '拿不到会话 id 时保持安静')
+  } finally {
+    rmSync(dir, { recursive: true, force: true })
+  }
+})
+
+test('sessionId 两头的空格会被去掉', () => {
+  const dir = makeDir()
+  try {
+    const cfg = normalizeConfig({ diaryDir: dir, sessionId: '  session-a  ' })
+    assert.equal(cfg.sessionId, 'session-a')
+  } finally {
+    rmSync(dir, { recursive: true, force: true })
+  }
+})
+
+test('提醒里要求把判断写进日记，不只是 json', () => {
+  const dir = makeDir()
+  try {
+    writeFileSync(join(dir, '2026-11-03.md'), '# 日记')
+    const out = __selfCheck({ diaryDir: dir })
+    assert.match(out.text, /写进记忆/)
+    assert.match(out.text, /关系判断/)
+    assert.match(out.text, /状态文件/)
   } finally {
     rmSync(dir, { recursive: true, force: true })
   }

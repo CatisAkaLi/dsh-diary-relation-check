@@ -1,7 +1,7 @@
 {
   "name": "dsh-diary-relation-check",
-  "version": "0.6.0",
-  "description": "日记更新时，在系统提示里提醒模型认真判断一次某个关系问题，并留下判断依据",
+  "version": "0.7.1",
+  "description": "日记更新时，在系统提示里提醒模型认真判断一次某个关系问题，判断写进日记并在指定会话回答",
   "type": "module",
   "main": "lib/index.js",
   "exports": {

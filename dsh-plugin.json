@@ -2,9 +2,9 @@
   "manifestVersion": "0.15",
   "id": "dsh-diary-relation-check",
   "name": "dsh-diary-relation-check",
-  "version": "0.6.0",
+  "version": "0.7.1",
   "license": "MIT",
-  "description": "日记更新时提醒模型认真判断一次某个关系问题，并留下判断依据",
+  "description": "日记更新时提醒模型认真判断一次某个关系问题，判断写进日记，并可以只在指定会话里回答",
   "facets": {
     "host": {
       "entry": "lib/index.js",
@@ -16,7 +16,7 @@
     "x-display": [
       {
         "title": "dsh-diary-relation-check",
-        "description": "日记一更新就在系统提示里出现一次，判断完写状态文件就安静"
+        "description": "日记一更新就在系统提示里出现一次；判断结果写进日记；配了 sessionId 就只在那一个会话里出现"
       }
     ]
   }
