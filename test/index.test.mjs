@@ -6,6 +6,7 @@ import { join, parse } from 'node:path'
 
 import {
   DEFAULTS,
+  buildDiskMissingHint,
   buildReminder,
   describeDiaryPattern,
   detectDiaryFormat,
@@ -16,8 +17,20 @@ import {
   memoryGuide,
   normalizeConfig,
   today,
+  volumeAvailable,
+  volumeRootOf,
   __selfCheck,
 } from '../lib/index.js'
+
+/** 找一个当前机器上不存在的盘符，用来模拟掉盘。没有就返回 null。 */
+function missingVolumeRoot() {
+  if (process.platform !== 'win32') return null
+  for (const letter of 'QRSTUVWXYZ') {
+    const root = `${letter}:\\`
+    if (!existsSync(root)) return root
+  }
+  return null
+}
 
 function makeDir() {
   const dir = mkdtempSync(join(tmpdir(), 'relation-check-'))
@@ -563,6 +576,74 @@ test('不是最新那篇更新了，也会触发提醒', () => {
     assert.ok(again.text.length > 0, '旧的那篇更新了也要提醒')
     assert.match(again.text, /2026-11-01-日记\.md.*← 有更新/)
     assert.doesNotMatch(again.text, /2026-11-03-日记\.md.*← 有更新/)
+  } finally {
+    rmSync(dir, { recursive: true, force: true })
+  }
+})
+
+test('volumeRootOf 抽出盘符或根', () => {
+  assert.equal(volumeRootOf('K:\\大肥鱼\\记忆'), 'K:\\')
+  assert.equal(volumeRootOf('/home/u/diary'), '/')
+})
+
+test('盘不在时提示检查磁盘，不催着建日记', () => {
+  const missing = missingVolumeRoot()
+  if (!missing) return // 这台机器没有空闲盘符，跳过
+
+  const target = join(missing, 'no-such-dir')
+  const cfg = normalizeConfig({ diaryDir: target, autoInit: true })
+
+  assert.equal(volumeAvailable(cfg), false)
+
+  const hint = buildDiskMissingHint(cfg)
+  assert.match(hint, /不可用/)
+  assert.match(hint, /磁盘/)
+  assert.doesNotMatch(hint, /还没有可用的日记/)
+})
+
+test('盘不在时 ensureDiary 一个字都不写', () => {
+  const missing = missingVolumeRoot()
+  if (!missing) return
+
+  const target = join(missing, 'no-such-dir')
+  const cfg = normalizeConfig({ diaryDir: target, autoInit: true })
+
+  const out = ensureDiary(cfg)
+  assert.equal(out.skipped, 'volume-missing')
+  assert.equal(out.createdDir, false)
+  assert.equal(out.createdFile, null)
+  assert.equal(existsSync(target), false, '盘不在就不该创建目录')
+})
+
+test('盘不在时 compute 走掉盘提示，不走建日记提示', () => {
+  const missing = missingVolumeRoot()
+  if (!missing) return
+
+  const r = __selfCheck({ diaryDir: join(missing, 'x'), autoInit: true })
+  assert.match(r.text, /不可用/)
+  assert.doesNotMatch(r.text, /还没有可用的日记/)
+})
+
+test('目录存在但为空时提示建日记', () => {
+  const dir = makeDir()
+  try {
+    const r = __selfCheck({ diaryDir: dir })
+    assert.match(r.text, /还没有可用的日记/)
+  } finally {
+    rmSync(dir, { recursive: true, force: true })
+  }
+})
+
+test('探测中文日期命名', () => {
+  const dir = makeDir()
+  try {
+    writeFileSync(join(dir, '2026年11月3日.md'), '# a\n')
+    writeFileSync(join(dir, '2026年11月4日.md'), '# b\n')
+
+    const r = detectDiaryFormat(dir)
+    assert.ok(r, '应该探测到中文日期格式')
+    assert.equal(r.count, 2)
+    assert.equal(r.pattern, '^\\d{4}年\\d{1,2}月\\d{1,2}日[^\\\\/]*\\.md$')
   } finally {
     rmSync(dir, { recursive: true, force: true })
   }

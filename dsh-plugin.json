@@ -2,11 +2,14 @@
   "manifestVersion": "0.15",
   "id": "dsh-diary-relation-check",
   "name": "dsh-diary-relation-check",
-  "version": "0.2.0",
+  "version": "0.6.0",
   "license": "MIT",
   "description": "日记更新时提醒模型认真判断一次某个关系问题，并留下判断依据",
   "facets": {
-    "host": { "entry": "lib/index.js", "apiVersion": "v1alpha1" }
+    "host": {
+      "entry": "lib/index.js",
+      "apiVersion": "v1alpha1"
+    }
   },
   "permissions": [],
   "contributes": {

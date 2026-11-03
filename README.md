@@ -118,11 +118,13 @@
 
 ## 安装
 
-### 方式一：从 npm
+### 方式一：从 npm（发布后可用）
 
 ```bash
 dsh plugin --profile web add dsh-diary-relation-check
 ```
+
+> 包名已经预留，但还没发布到 npm。现在只能用方式二。
 
 ### 方式二：从源码
 
@@ -132,7 +134,19 @@ cd dsh-diary-relation-check
 dsh plugin --profile web add link:$PWD
 ```
 
+不用 `git` 也可以：把仓库下载到本地任意目录，然后 `dsh plugin --profile web add link:<那个目录的绝对路径>`。
+
 装完必须**重启 DSH**（插件模块走 ESM 缓存，热更新不会重新加载）。
+
+装完还要**加配置**——插件不知道你的日记在哪，`diaryDir` 是必填项，不填会在日志里报错并且不工作。见下一节。
+
+### 卸载
+
+1. 从 profile 的 `cordis.patch.yml` 里删掉 `id: relation-check` 那一段；
+2. 从 profile 的 `package.json` 的 `dsh.profile.bundles` 里删掉 `"dsh-diary-relation-check"`；
+3. 重启 DSH。
+
+插件不写系统里任何别的地方。删完就干净了，日记文件一个都不受影响。
 
 ---
 
@@ -340,7 +354,7 @@ import { __selfCheck } from 'dsh-diary-relation-check'
 console.log(__selfCheck({ diaryDir: '/path/to/diary' }))
 ```
 
-返回 `diary`、`diaryMtime`、`lastCheckMs`、`stateExists`、`text` 五个字段。`text` 是当前该注入的提醒文本，空字符串表示这次不会提醒。
+返回 `diary`、`diaries`、`diaryMtime`、`lastCheckMs`、`stateExists`、`text` 这几个字段。`diaries` 是全部日记的路径，`diary` 是其中最新的那篇；`text` 是当前该注入的提醒文本，空字符串表示这次不会提醒。
 
 **能不能同时监控好几个目录？**
 
@@ -362,6 +376,20 @@ console.log(__selfCheck({ diaryDir: '/path/to/diary' }))
 **它会读别的文件吗？**
 
 只读 `diaryDir` 里的文件名、和最新那篇的 `stat`。不读日记内容，不碰其他路径。
+
+**日记放在移动硬盘上，拔了会怎样？**
+
+插件会先看那个盘符在不在（比如 `K:\`）。不在就注入一条提示，告诉你这个盘现在不可用、去检查磁盘，然后**不创建任何东西、不催你建日记**。
+
+盘插回来之后，那条提示自动消失，正常判断照旧。
+
+**状态文件写坏了会怎样？**
+
+不会崩。插件读状态文件时，遇到坏 JSON、空文件、编码不对，一律当作「还没有判断过」，于是下一次日记更新时会重新提醒一次。你手动清空它也是这个效果。
+
+**能让它更频繁地看吗？**
+
+默认每次组装系统提示时都查一遍，但有 30 秒缓存（`cacheMs`）。日记刚改完的 30 秒内可能还看不到变化。
 
 **状态文件能手动改吗？**
 

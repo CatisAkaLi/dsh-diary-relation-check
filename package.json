@@ -1,6 +1,6 @@
 {
   "name": "dsh-diary-relation-check",
-  "version": "0.5.0",
+  "version": "0.6.0",
   "description": "日记更新时，在系统提示里提醒模型认真判断一次某个关系问题，并留下判断依据",
   "type": "module",
   "main": "lib/index.js",
@@ -46,9 +46,13 @@
   "keywords": [
     "dsh",
     "dsh-plugin",
+    "diary",
+    "relationship",
+    "companion",
+    "memory",
+    "remember",
     "中文",
     "日记",
-    "关系",
-    "memory"
+    "关系"
   ]
 }
