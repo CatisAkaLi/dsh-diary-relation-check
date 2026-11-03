@@ -1,8 +1,8 @@
-# dsh-relation-check 的 bundle patch
+# dsh-diary-relation-check 的 bundle patch
 #
 #   insert: 往配置树里加一行 entry
 #   id:     唯一标识
-#   name:   'dsh-relation-check' 解析到本包入口 lib/index.js
+#   name:   'dsh-diary-relation-check' 解析到本包入口 lib/index.js
 #   config: 原样传给 apply(root, config)
 #
 # 这里故意不带 config：diaryDir 因人而异，必须由使用者自己填。
@@ -10,7 +10,7 @@
 #
 #   - insert:
 #       - id: relation-check
-#         name: 'dsh-relation-check'
+#         name: 'dsh-diary-relation-check'
 #         config:
 #           diaryDir: '/path/to/your/diary'
 #
@@ -18,4 +18,4 @@
 
 - insert:
     - id: relation-check
-      name: 'dsh-relation-check'
+      name: 'dsh-diary-relation-check'

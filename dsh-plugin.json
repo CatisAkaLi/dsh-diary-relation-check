@@ -1,7 +1,7 @@
 {
   "manifestVersion": "0.15",
-  "id": "dsh-relation-check",
-  "name": "dsh-relation-check",
+  "id": "dsh-diary-relation-check",
+  "name": "dsh-diary-relation-check",
   "version": "0.2.0",
   "license": "MIT",
   "description": "日记更新时提醒模型认真判断一次某个关系问题，并留下判断依据",
@@ -12,7 +12,7 @@
   "contributes": {
     "x-display": [
       {
-        "title": "dsh-relation-check",
+        "title": "dsh-diary-relation-check",
         "description": "日记一更新就在系统提示里出现一次，判断完写状态文件就安静"
       }
     ]

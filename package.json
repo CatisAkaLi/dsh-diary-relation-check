@@ -1,5 +1,5 @@
 {
-  "name": "dsh-relation-check",
+  "name": "dsh-diary-relation-check",
   "version": "0.5.0",
   "description": "日记更新时，在系统提示里提醒模型认真判断一次某个关系问题，并留下判断依据",
   "type": "module",
@@ -34,11 +34,11 @@
   "author": "CatisAkaLi",
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/CatisAkaLi/dsh-relation-check.git"
+    "url": "git+https://github.com/CatisAkaLi/dsh-diary-relation-check.git"
   },
-  "homepage": "https://github.com/CatisAkaLi/dsh-relation-check#readme",
+  "homepage": "https://github.com/CatisAkaLi/dsh-diary-relation-check#readme",
   "bugs": {
-    "url": "https://github.com/CatisAkaLi/dsh-relation-check/issues"
+    "url": "https://github.com/CatisAkaLi/dsh-diary-relation-check/issues"
   },
   "engines": {
     "node": ">=20"

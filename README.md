@@ -1,4 +1,4 @@
-# dsh-relation-check
+# dsh-diary-relation-check
 
 一个 DSH 插件：**日记有更新时，在系统提示里提醒模型认真判断一次某个关系问题，并把判断依据留下来。**
 
@@ -121,14 +121,14 @@
 ### 方式一：从 npm
 
 ```bash
-dsh plugin --profile web add dsh-relation-check
+dsh plugin --profile web add dsh-diary-relation-check
 ```
 
 ### 方式二：从源码
 
 ```bash
-git clone https://github.com/CatisAkaLi/dsh-relation-check.git
-cd dsh-relation-check
+git clone https://github.com/CatisAkaLi/dsh-diary-relation-check.git
+cd dsh-diary-relation-check
 dsh plugin --profile web add link:$PWD
 ```
 
@@ -143,7 +143,7 @@ dsh plugin --profile web add link:$PWD
 ```yaml
 - insert:
     - id: relation-check
-      name: 'dsh-relation-check'
+      name: 'dsh-diary-relation-check'
       config:
         diaryDir: 'D:\我的日记'
         diaryPattern: '^\d{4}-\d{2}-\d{2}\.md$'
@@ -177,7 +177,7 @@ dsh plugin --profile web add link:$PWD
 
 ```yaml
 - id: relation-check
-  name: dsh-relation-check
+  name: dsh-diary-relation-check
   config:
     diaryDir: '/path/to/diary'
     autoInit: true
@@ -219,7 +219,7 @@ dsh plugin --profile web add link:$PWD
 
 ```yaml
 - id: relation-check
-  name: dsh-relation-check
+  name: dsh-diary-relation-check
   config:
     diaryDir: '/path/to/memory'
     memorySetup: true
@@ -336,7 +336,7 @@ ESM 模块在进程里只加载一次。改代码必须重启 DSH 进程，热�
 **想看它到底算出了什么？**
 
 ```js
-import { __selfCheck } from 'dsh-relation-check'
+import { __selfCheck } from 'dsh-diary-relation-check'
 console.log(__selfCheck({ diaryDir: '/path/to/diary' }))
 ```
 
@@ -348,13 +348,13 @@ console.log(__selfCheck({ diaryDir: '/path/to/diary' }))
 
 ```yaml
 - id: relation-check-work
-  name: dsh-relation-check
+  name: dsh-diary-relation-check
   config:
     diaryDir: '/path/to/work-notes'
     question: '这份工作还要不要继续'
 
 - id: relation-check-life
-  name: dsh-relation-check
+  name: dsh-diary-relation-check
   config:
     diaryDir: '/path/to/diary'
 ```
