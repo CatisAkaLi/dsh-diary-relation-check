@@ -1,17 +1,19 @@
 {
   "name": "dsh-diary-relation-check",
-  "version": "0.7.1",
-  "description": "日记更新时，在系统提示里提醒模型认真判断一次某个关系问题，判断写进日记并在指定会话回答",
+  "version": "0.9.1",
+  "description": "记忆按日/周/月/年分层，更新时提醒模型按层读一遍、复盘一段关系并给出理由；判断写回当天日记，成为下一次复盘的记忆",
   "type": "module",
   "main": "lib/index.js",
   "exports": {
     ".": {
       "default": "./lib/index.js"
     },
+    "./client": "./lib/client.js",
     "./package.json": "./package.json"
   },
   "files": [
     "lib",
+    "tools",
     "dsh-plugin.json",
     "cordis.patch.yml",
     "README.md",
@@ -20,9 +22,16 @@
   "dsh": {
     "bundle": {
       "patch": "./cordis.patch.yml"
+    },
+    "client": {
+      "platform": "web"
+    },
+    "compatibility": {
+      "dshReleases": "0.2.1-rc.5"
     }
   },
   "scripts": {
+    "build:client": "node tools/build-client.mjs",
     "test": "node --test test/*.test.mjs"
   },
   "os": [
@@ -46,11 +55,15 @@
   "keywords": [
     "dsh",
     "dsh-plugin",
-    "diary",
-    "relationship",
-    "companion",
+    "deepseek-harness",
     "memory",
-    "remember",
+    "agent-memory",
+    "relationship",
+    "diary",
+    "ai-companion",
+    "companion",
+    "local-first",
+    "prompt-injection",
     "中文",
     "日记",
     "关系"

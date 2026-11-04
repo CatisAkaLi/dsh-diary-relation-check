@@ -16,20 +16,34 @@ import {
   DEFAULTS,
   acceptsSession,
   buildDiskMissingHint,
+  buildInitHint,
+  buildMigrationHint,
+  buildPeriodicHint,
   buildReminder,
-  describeDiaryPattern,
-  detectDiaryFormat,
+  buildTodayHint,
+  compute,
+  dateStr,
+  dayFileName,
   ensureDiary,
   ensureMemory,
   ensureStateDir,
-  latestDiary,
-  listDiaries,
+  isoWeek,
   memoryGuide,
+  mergeConfigSources,
+  monthFileName,
   normalizeConfig,
+  periodicDue,
+  pluginConfigFile,
+  readPluginConfig,
+  scanMemory,
+  selectLayers,
   sessionIdOf,
+  suggestDiaryName,
   today,
   volumeAvailable,
   volumeRootOf,
+  weekFileName,
+  yearFileName,
   __selfCheck,
 } from '../lib/index.js'
 
@@ -44,9 +58,22 @@ function missingVolumeRoot() {
 }
 
 function makeDir() {
-  const dir = mkdtempSync(join(tmpdir(), 'relation-check-'))
-  return dir
+  return mkdtempSync(join(tmpdir(), 'relation-check-'))
 }
+
+/** 写文件并指定 mtime。 */
+function writeAt(file, body, mtime) {
+  writeFileSync(file, body)
+  if (mtime) utimesSync(file, mtime, mtime)
+}
+
+/** 写状态文件。 */
+function setState(cfg, ms) {
+  mkdirSync(dirname(cfg.stateFile), { recursive: true })
+  writeFileSync(cfg.stateFile, JSON.stringify({ lastCheckMs: ms }))
+}
+
+// ───────────────────────── 配置 ─────────────────────────
 
 test('normalizeConfig 缺 diaryDir 时抛错', () => {
   assert.throws(() => normalizeConfig({}), /diaryDir/)
@@ -62,6 +89,7 @@ test('normalizeConfig 默认状态文件放在日记目录外面', () => {
     assert.ok(!cfg.stateFile.startsWith(dir), '状态文件不能落在日记目录里面')
     assert.equal(cfg.person, DEFAULTS.person)
     assert.equal(cfg.question, DEFAULTS.question)
+    assert.equal(cfg.initFileName, '{{date}}-日记.md')
   } finally {
     rmSync(base, { recursive: true, force: true })
   }
@@ -85,7 +113,6 @@ test('ensureStateDir 只建目录，不建文件', () => {
     mkdirSync(dir, { recursive: true })
     const cfg = normalizeConfig({ diaryDir: dir })
     assert.equal(existsSync(dirname(cfg.stateFile)), false, '一开始目录不存在')
-
     const err = ensureStateDir(cfg)
     assert.equal(err, '')
     assert.equal(existsSync(dirname(cfg.stateFile)), true)
@@ -95,183 +122,303 @@ test('ensureStateDir 只建目录，不建文件', () => {
   }
 })
 
-test('normalizeConfig 拒绝非法正则', () => {
+test('sessionId 两头的空格会被去掉', () => {
   const dir = makeDir()
   try {
-    assert.throws(() => normalizeConfig({ diaryDir: dir, diaryPattern: '([' }), /正则/)
+    const cfg = normalizeConfig({ diaryDir: dir, sessionId: '  session-abc  ' })
+    assert.equal(cfg.sessionId, 'session-abc')
   } finally {
     rmSync(dir, { recursive: true, force: true })
   }
 })
 
-test('latestDiary 取日期最大的一篇', () => {
+test('mergeConfigSources：YAML 覆盖 JSON，JSON 覆盖默认', () => {
+  const merged = mergeConfigSources(
+    { diaryDir: 'D:/yaml', question: 'yaml-q' },
+    { diaryDir: 'D:/json', question: 'json-q', person: 'json-p' }
+  )
+  assert.equal(merged.diaryDir, 'D:/yaml')
+  assert.equal(merged.question, 'yaml-q')
+  assert.equal(merged.person, 'json-p')
+})
+
+test('readPluginConfig 读不到、读坏、不是对象时都返回空对象', () => {
   const dir = makeDir()
   try {
-    writeFileSync(join(dir, '2026-11-01.md'), 'a')
-    writeFileSync(join(dir, '2026-11-03.md'), 'b')
-    writeFileSync(join(dir, '2026-11-02.md'), 'c')
-    writeFileSync(join(dir, 'notes.txt'), 'd')
+    assert.deepEqual(readPluginConfig(join(dir, 'nope.json')), {})
+    writeFileSync(join(dir, 'bad.json'), '{oops')
+    assert.deepEqual(readPluginConfig(join(dir, 'bad.json')), {})
+    writeFileSync(join(dir, 'arr.json'), '[]')
+    assert.deepEqual(readPluginConfig(join(dir, 'arr.json')), {})
+    writeFileSync(join(dir, 'ok.json'), JSON.stringify({ diaryDir: 'D:/x' }))
+    assert.equal(readPluginConfig(join(dir, 'ok.json')).diaryDir, 'D:/x')
+  } finally {
+    rmSync(dir, { recursive: true, force: true })
+  }
+})
+
+test('pluginConfigFile 跟着 DSH_HOME 走', () => {
+  const old = process.env.DSH_HOME
+  try {
+    process.env.DSH_HOME = 'D:/fake-home'
+    assert.equal(pluginConfigFile(), join('D:/fake-home', 'dsh-diary-relation-check', 'config.json'))
+  } finally {
+    if (old === undefined) delete process.env.DSH_HOME
+    else process.env.DSH_HOME = old
+  }
+})
+
+test('旧的 diaryPattern 配置被忽略，不报错也不生效', () => {
+  const dir = makeDir()
+  try {
+    const cfg = normalizeConfig({ diaryDir: dir, diaryPattern: '^\d{4}-\d{2}-\d{2}\.md$' })
+    assert.equal(cfg.diaryPattern, undefined)
+  } finally {
+    rmSync(dir, { recursive: true, force: true })
+  }
+})
+
+// ───────────────────────── 文件名与 ISO 周 ─────────────────────────
+
+test('文件名按固定四层生成', () => {
+  const d = new Date(2026, 10, 4)
+  assert.equal(dayFileName(d), '2026-11-04-日记.md')
+  assert.equal(monthFileName(d), '2026-11-月记.md')
+  assert.equal(yearFileName(d), '2026-年记.md')
+  assert.match(weekFileName(d), /^2026-W\d{2}-周记\.md$/)
+})
+
+test('isoWeek 算出 2026-11-04 属于第 45 周', () => {
+  const { year, week } = isoWeek(new Date(2026, 10, 4))
+  assert.equal(year, 2026)
+  assert.equal(week, 45)
+})
+
+test('isoWeek 跨年周归到上一年', () => {
+  const { year, week } = isoWeek(new Date(2027, 0, 1))
+  assert.equal(year, 2026)
+  assert.equal(week, 53)
+})
+
+test('today 返回 YYYY-MM-DD', () => {
+  assert.match(today(), /^\d{4}-\d{2}-\d{2}$/)
+})
+
+// ───────────────────────── 扫描与分层 ─────────────────────────
+
+test('scanMemory 认得出四层和我是谁', () => {
+  const dir = makeDir()
+  try {
+    writeFileSync(join(dir, '2026-11-03-日记.md'), 'a')
+    writeFileSync(join(dir, '2026-W44-周记.md'), 'b')
+    writeFileSync(join(dir, '2026-10-月记.md'), 'c')
+    writeFileSync(join(dir, '2025-年记.md'), 'd')
+    writeFileSync(join(dir, '我是谁.md'), 'e')
+    writeFileSync(join(dir, 'notes.txt'), 'f')
 
     const cfg = normalizeConfig({ diaryDir: dir })
-    assert.equal(latestDiary(cfg), join(dir, '2026-11-03.md'))
+    const scan = scanMemory(cfg)
+
+    assert.equal(scan.days.length, 1)
+    assert.equal(scan.weeks.length, 1)
+    assert.equal(scan.months.length, 1)
+    assert.equal(scan.years.length, 1)
+    assert.equal(scan.who.file, '我是谁.md')
+    assert.deepEqual(scan.foreign, [])
   } finally {
     rmSync(dir, { recursive: true, force: true })
   }
 })
 
-test('latestDiary 没有匹配文件时返回 null', () => {
+test('scanMemory 把认不出的 md 收进 foreign', () => {
   const dir = makeDir()
   try {
-    writeFileSync(join(dir, 'notes.txt'), 'd')
+    writeFileSync(join(dir, '2026-11-03.md'), 'a')
+    writeFileSync(join(dir, '笔记.md'), 'b')
+    writeFileSync(join(dir, '2026-11-03-日记.md'), 'c')
+
     const cfg = normalizeConfig({ diaryDir: dir })
-    assert.equal(latestDiary(cfg), null)
+    const scan = scanMemory(cfg)
+
+    assert.equal(scan.days.length, 1)
+    assert.deepEqual(scan.foreign.sort(), ['2026-11-03.md', '笔记.md'].sort())
   } finally {
     rmSync(dir, { recursive: true, force: true })
   }
 })
 
-test('日记比上次判断新时给出提醒，判断后安静', () => {
+test('scanMemory 按日期排序', () => {
   const dir = makeDir()
   try {
-    const diary = join(dir, '2026-11-03.md')
-    writeFileSync(diary, '# 日记')
-    const state = join(dir, 'state.json')
-    const cfg = normalizeConfig({ diaryDir: dir, stateFile: state })
+    writeFileSync(join(dir, '2026-11-03-日记.md'), 'a')
+    writeFileSync(join(dir, '2026-11-01-日记.md'), 'b')
+    writeFileSync(join(dir, '2026-11-02-日记.md'), 'c')
 
-    const first = __selfCheck({ diaryDir: dir, stateFile: state })
-    assert.ok(first.text.length > 0, '第一次应该提醒')
-    assert.match(first.text, /2026-11-03\.md/)
+    const cfg = normalizeConfig({ diaryDir: dir })
+    const scan = scanMemory(cfg)
 
-    // 模型判断完，把时间写回状态文件（稍晚于日记 mtime）
-    writeFileSync(
-      cfg.stateFile,
-      JSON.stringify({ lastCheckMs: Date.now() + 1000, verdict: 'not-yet', reason: '测试' }),
+    assert.deepEqual(
+      scan.days.map((d) => d.date),
+      ['2026-11-01', '2026-11-02', '2026-11-03']
     )
-
-    const second = __selfCheck({ diaryDir: dir, stateFile: state })
-    assert.equal(second.text, '', '判断后应该安静')
   } finally {
     rmSync(dir, { recursive: true, force: true })
   }
 })
 
-test('状态文件带 BOM 也能读', () => {
+test('selectLayers 只取 1 年 3 月 4 周和最近 7 天', () => {
   const dir = makeDir()
   try {
-    const diary = join(dir, '2026-11-03.md')
-    writeFileSync(diary, '# 日记')
+    for (const year of [2023, 2024, 2025]) {
+      writeFileSync(join(dir, `${year}-年记.md`), 'y')
+    }
+    for (const month of ['01', '02', '03', '04', '05']) {
+      writeFileSync(join(dir, `2026-${month}-月记.md`), 'm')
+    }
+    for (const week of ['W40', 'W41', 'W42', 'W43', 'W44', 'W45']) {
+      writeFileSync(join(dir, `2026-${week}-周记.md`), 'w')
+    }
+    for (const day of ['2026-10-20', '2026-10-28', '2026-10-29', '2026-10-30', '2026-10-31', '2026-11-01', '2026-11-02', '2026-11-03', '2026-11-04']) {
+      writeFileSync(join(dir, `${day}-日记.md`), 'd')
+    }
 
-    const state = join(dir, 'state.json')
-    const cfg = normalizeConfig({ diaryDir: dir, stateFile: state })
-    writeFileSync(
-      cfg.stateFile,
-      '\uFEFF' + JSON.stringify({ lastCheckMs: Date.now() + 1000 }),
-      'utf8',
+    const cfg = normalizeConfig({ diaryDir: dir })
+    const scan = scanMemory(cfg)
+    const layers = selectLayers(scan, new Date(2026, 10, 4, 20, 0))
+
+    assert.equal(layers.years.length, 1)
+    assert.equal(layers.years[0].year, 2025)
+    assert.equal(layers.months.length, 3)
+    assert.deepEqual(layers.months.map((m) => m.key), ['2026-03', '2026-04', '2026-05'])
+    assert.equal(layers.weeks.length, 4)
+    assert.deepEqual(layers.weeks.map((w) => w.key), ['2026-W42', '2026-W43', '2026-W44', '2026-W45'])
+    assert.deepEqual(
+      layers.days.map((d) => d.date),
+      ['2026-10-29', '2026-10-30', '2026-10-31', '2026-11-01', '2026-11-02', '2026-11-03', '2026-11-04']
     )
-
-    const out = __selfCheck({ diaryDir: dir, stateFile: state })
-    assert.equal(out.text, '', '带 BOM 也能正确读到 lastCheckMs')
-    assert.ok(out.lastCheckMs > 0)
   } finally {
     rmSync(dir, { recursive: true, force: true })
   }
 })
 
-test('提醒文本使用配置的问题和代词', () => {
+test('最近 7 天没有日记时，兜底给最新一篇', () => {
   const dir = makeDir()
   try {
-    const cfg = normalizeConfig({
-      diaryDir: dir,
-      person: '小王',
-      question: '要不要跟小王合伙',
-    })
-    const text = buildReminder(cfg, join(dir, '2026-11-03.md'))
+    writeFileSync(join(dir, '2026-10-01-日记.md'), 'a')
+    writeFileSync(join(dir, '2026-10-28-日记.md'), 'b')
+    writeFileSync(join(dir, '2026-10-30-日记.md'), 'c')
 
-    assert.match(text, /要不要跟小王合伙/)
-    assert.match(text, /小王对你好不好/)
-    assert.match(text, /值不值得跟小王确定关系/)
-    assert.ok(!text.includes('他等了很久'), '默认代词不应出现在自定义配置里')
+    const cfg = normalizeConfig({ diaryDir: dir })
+    const scan = scanMemory(cfg)
+    const layers = selectLayers(scan, new Date(2026, 10, 4, 20, 0))
+
+    assert.deepEqual(layers.days.map((d) => d.date), ['2026-10-30'])
   } finally {
     rmSync(dir, { recursive: true, force: true })
   }
 })
 
-test('空日记目录会给出初始化提示，不报错', () => {
+// ───────────────────────── 迁移 ─────────────────────────
+
+test('只有外来 md 时给出迁移确认，列出候选', () => {
   const dir = makeDir()
   try {
-    const out = __selfCheck({ diaryDir: dir })
-    assert.equal(out.diary, null)
-    assert.ok(out.text.includes('还没有可用的日记'))
+    writeFileSync(join(dir, '2026-11-03.md'), 'a')
+    writeFileSync(join(dir, '日记-2026-11-02.md'), 'b')
+
+    const cfg = normalizeConfig({ diaryDir: dir })
+    const scan = scanMemory(cfg)
+    const text = buildMigrationHint(cfg, scan)
+
+    assert.match(text, /先确认哪些是日记/)
+    assert.match(text, /2026-11-03\.md/)
+    assert.match(text, /日记-2026-11-02\.md/)
+    assert.match(text, /问用户/)
+    assert.match(text, /插件不自己改名/)
+    assert.match(text, /2026-11-03-日记\.md/)
+    assert.match(text, /只改文件名，不动文件内容/)
   } finally {
     rmSync(dir, { recursive: true, force: true })
   }
 })
 
-// === 初始化（autoInit） ===
+test('suggestDiaryName 能给出改名建议，推不出就不猜', () => {
+  assert.equal(suggestDiaryName('2026-10-28.md'), '2026-10-28-日记.md')
+  assert.equal(suggestDiaryName('日记-2026-10-28.md'), '2026-10-28-日记.md')
+  assert.equal(suggestDiaryName('2026年10月28日.md'), '2026-10-28-日记.md')
+  assert.equal(suggestDiaryName('随笔.md'), null)
+})
 
-test('autoInit 关闭时，不创建目录也不创建文件', () => {
-  const base = makeDir()
-  const target = join(base, 'diary')
+test('有插件格式的日记时不再提示迁移', () => {
+  const dir = makeDir()
   try {
-    const cfg = normalizeConfig({ diaryDir: target })
+    writeFileSync(join(dir, '2026-11-03-日记.md'), 'a')
+    writeFileSync(join(dir, '随手记.md'), 'b')
+
+    const cfg = normalizeConfig({ diaryDir: dir })
+    const scan = scanMemory(cfg)
+    assert.equal(scan.foreign.length, 1)
+
+    const check = __selfCheck({ diaryDir: dir })
+    assert.doesNotMatch(check.text, /先确认哪些是日记/)
+  } finally {
+    rmSync(dir, { recursive: true, force: true })
+  }
+})
+
+test('目录里有外来 md 时 ensureDiary 不建新文件', () => {
+  const dir = makeDir()
+  try {
+    writeFileSync(join(dir, '2026-11-03.md'), 'a')
+    const cfg = normalizeConfig({ diaryDir: dir, autoInit: true })
     const out = ensureDiary(cfg)
+    assert.equal(out.skipped, 'foreign-files')
+    assert.equal(existsSync(join(dir, `${today()}-日记.md`)), false)
+  } finally {
+    rmSync(dir, { recursive: true, force: true })
+  }
+})
 
-    assert.equal(out.createdDir, false)
+// ───────────────────────── 初始化 ─────────────────────────
+
+test('空目录给出初始化提示，写清新格式', () => {
+  const dir = makeDir()
+  try {
+    const cfg = normalizeConfig({ diaryDir: dir })
+    const text = buildInitHint(cfg)
+    assert.match(text, /2026-11-04-日记\.md/)
+    assert.match(text, /周记/)
+    assert.match(text, /月记/)
+    assert.match(text, /年记/)
+    assert.match(text, /已经有记忆或日记文件吗/)
+    assert.match(text, /从建好那天起/)
+  } finally {
+    rmSync(dir, { recursive: true, force: true })
+  }
+})
+
+test('autoInit 打开时创建今天的日日记', () => {
+  const dir = makeDir()
+  try {
+    const cfg = normalizeConfig({ diaryDir: dir, autoInit: true })
+    const out = ensureDiary(cfg)
+    const path = join(dir, `${today()}-日记.md`)
+    assert.equal(out.createdFile, path)
+    assert.equal(existsSync(path), true)
+  } finally {
+    rmSync(dir, { recursive: true, force: true })
+  }
+})
+
+test('已经有日日记时不再创建', () => {
+  const dir = makeDir()
+  try {
+    const old = join(dir, '2026-01-01-日记.md')
+    writeFileSync(old, 'a')
+    const cfg = normalizeConfig({ diaryDir: dir, autoInit: true })
+    const out = ensureDiary(cfg)
     assert.equal(out.createdFile, null)
-    assert.equal(out.error, '')
-    assert.equal(existsSync(target), false, '目录不应该被创建')
-  } finally {
-    rmSync(base, { recursive: true, force: true })
-  }
-})
-
-test('autoInit 打开时，创建目录和今天的第一篇', () => {
-  const base = makeDir()
-  const target = join(base, 'diary')
-  try {
-    const cfg = normalizeConfig({ diaryDir: target, autoInit: true })
-    const out = ensureDiary(cfg)
-
-    assert.equal(out.error, '')
-    assert.equal(out.createdDir, true)
-    assert.ok(out.createdFile, '应该创建了第一篇')
-    assert.equal(existsSync(out.createdFile), true)
-    assert.ok(out.createdFile.endsWith(`${today()}.md`))
-
-    // 内容有标题，且是空模板
-    const body = readFileSync(out.createdFile, 'utf8')
-    assert.match(body, /^# \d{4}-\d{2}-\d{2}/)
-  } finally {
-    rmSync(base, { recursive: true, force: true })
-  }
-})
-
-test('目录存在但里面没有日记时，autoInit 只补第一篇', () => {
-  const dir = makeDir()
-  try {
-    writeFileSync(join(dir, 'notes.txt'), '不是日记')
-
-    const cfg = normalizeConfig({ diaryDir: dir, autoInit: true })
-    const out = ensureDiary(cfg)
-
-    assert.equal(out.createdDir, false, '目录已存在，不应该重建')
-    assert.ok(out.createdFile)
-    assert.equal(existsSync(join(dir, 'notes.txt')), true, '原有文件不能动')
-  } finally {
-    rmSync(dir, { recursive: true, force: true })
-  }
-})
-
-test('已经有日记时不重复创建', () => {
-  const dir = makeDir()
-  try {
-    writeFileSync(join(dir, '2026-11-01.md'), '旧日记')
-
-    const cfg = normalizeConfig({ diaryDir: dir, autoInit: true })
-    const out = ensureDiary(cfg)
-
-    assert.equal(out.createdDir, false)
-    assert.equal(out.createdFile, null, '有日记就不该再建')
+    assert.equal(existsSync(join(dir, `${today()}-日记.md`)), false)
   } finally {
     rmSync(dir, { recursive: true, force: true })
   }
@@ -280,16 +427,12 @@ test('已经有日记时不重复创建', () => {
 test('绝不覆盖同名文件', () => {
   const dir = makeDir()
   try {
-    const name = `${today()}.md`
-    writeFileSync(join(dir, name), '我自己写的，不能被覆盖')
-
-    const cfg = normalizeConfig({ diaryDir: dir, autoInit: true })
+    const path = join(dir, `${today()}-日记.md`)
+    writeFileSync(path, '手写的')
+    const cfg = normalizeConfig({ diaryDir: dir, autoInit: true, diaryTemplate: '模板' })
     const out = ensureDiary(cfg)
-
-    // 文件已存在（但不匹配默认 pattern 之外的情况），这里 pattern 是匹配的，
-    // 所以 latestDiary 会先找到它，ensureDiary 直接返回，不会碰它。
     assert.equal(out.createdFile, null)
-    assert.equal(readFileSync(join(dir, name), 'utf8'), '我自己写的，不能被覆盖')
+    assert.equal(readFileSync(path, 'utf8'), '手写的')
   } finally {
     rmSync(dir, { recursive: true, force: true })
   }
@@ -299,416 +442,296 @@ test('autoInit 拒绝在磁盘根目录创建', () => {
   const root = parse(process.cwd()).root
   const cfg = normalizeConfig({ diaryDir: root, autoInit: true })
   const out = ensureDiary(cfg)
-
-  assert.ok(out.error, '应该报错')
-  assert.match(out.error, /路径太浅/)
-  assert.equal(out.createdDir, false)
-})
-
-test('没有日记时返回初始化提示，而不是空字符串', () => {
-  const dir = makeDir()
-  try {
-    const out = __selfCheck({ diaryDir: dir })
-    assert.equal(out.diary, null)
-    assert.ok(out.text.length > 0, '应该给出提示')
-    assert.match(out.text, /还没有可用的日记/)
-    assert.match(out.text, /autoInit/)
-  } finally {
-    rmSync(dir, { recursive: true, force: true })
-  }
-})
-
-test('diaryGuide 可以关掉', () => {
-  const dir = makeDir()
-  try {
-    writeFileSync(join(dir, '2026-11-03.md'), '# 日记')
-    const out = __selfCheck({ diaryDir: dir, diaryGuide: false })
-    assert.ok(!out.text.includes('怎么写：一天一个文件'), '关掉后不应出现指南')
-  } finally {
-    rmSync(dir, { recursive: true, force: true })
-  }
-})
-
-test('diaryGuide 可以是自定义字符串', () => {
-  const dir = makeDir()
-  try {
-    writeFileSync(join(dir, '2026-11-03.md'), '# 日记')
-    const out = __selfCheck({ diaryDir: dir, diaryGuide: '按我自己的规矩记。' })
-    assert.ok(out.text.includes('按我自己的规矩记。'))
-  } finally {
-    rmSync(dir, { recursive: true, force: true })
-  }
-})
-
-// === 完整记忆方案（memorySetup） ===
-
-test('memorySetup 关闭时，不建记忆文件', () => {
-  const base = makeDir()
-  const target = join(base, 'memory')
-  try {
-    const cfg = normalizeConfig({ diaryDir: target, autoInit: true })
-    const out = ensureMemory(cfg)
-
-    assert.equal(out.error, '')
-    assert.equal(out.created.length, 0)
-    assert.equal(existsSync(target), false)
-  } finally {
-    rmSync(base, { recursive: true, force: true })
-  }
-})
-
-test('memorySetup 打开时，建我是谁和第一篇日记', () => {
-  const base = makeDir()
-  const target = join(base, 'memory')
-  try {
-    const cfg = normalizeConfig({ diaryDir: target, memorySetup: true })
-    assert.equal(cfg.autoInit, true, 'memorySetup 应自动带上 autoInit')
-
-    const mem = ensureMemory(cfg)
-    assert.equal(mem.error, '')
-    assert.ok(existsSync(join(target, '我是谁.md')), '应创建我是谁')
-    assert.equal(existsSync(join(target, '工程记忆')), false, '不该建工程记忆，这个插件只管关系')
-
-    const diary = ensureDiary(cfg)
-    assert.equal(diary.error, '')
-    assert.ok(diary.createdFile, '应创建第一篇日记')
-
-    // 我是谁是一页活页，不是流水账，开头该有标题
-    const who = readFileSync(join(target, '我是谁.md'), 'utf8')
-    assert.match(who, /^# 我是谁/)
-    assert.match(who, /改，不往下加/)
-  } finally {
-    rmSync(base, { recursive: true, force: true })
-  }
-})
-
-test('memorySetup 不覆盖已有的我是谁', () => {
-  const dir = makeDir()
-  try {
-    writeFileSync(join(dir, '我是谁.md'), '我自己写的，不能被改')
-    writeFileSync(join(dir, '2026-11-03.md'), '# 日记')
-
-    const cfg = normalizeConfig({ diaryDir: dir, memorySetup: true })
-    const out = ensureMemory(cfg)
-
-    assert.equal(out.error, '')
-    assert.equal(readFileSync(join(dir, '我是谁.md'), 'utf8'), '我自己写的，不能被改')
-    assert.ok(out.existed.includes(join(dir, '我是谁.md')))
-  } finally {
-    rmSync(dir, { recursive: true, force: true })
-  }
-})
-
-test('memorySetup 拒绝在磁盘根建记忆', () => {
-  const root = parse(process.cwd()).root
-  const cfg = normalizeConfig({ diaryDir: root, memorySetup: true })
-  const out = ensureMemory(cfg)
-
-  assert.ok(out.error)
   assert.match(out.error, /路径太浅/)
 })
 
-test('memoryGuide 只管关系，不带工程记忆', () => {
-  const cfg = normalizeConfig({ diaryDir: 'C:\\demo\\记忆' })
-  const guide = memoryGuide(cfg)
-
-  assert.ok(guide.includes('我是谁'))
-  assert.ok(guide.includes('日记'))
-  assert.ok(guide.includes('C:\\demo\\记忆'), '路径要写进指南')
-  assert.ok(!guide.includes('工程记忆'), '这个插件不碰工程记忆')
-  assert.ok(!guide.includes('大肥鱼'), '不能带个人隐私')
-  assert.match(guide, /只记关系/)
-})
-
-// === 兼容别人已有的命名 ===
-
-test('detectDiaryFormat 认得出 2026-11-03.md', () => {
+test('initFileName 不是日日记格式时报错', () => {
   const dir = makeDir()
   try {
-    writeFileSync(join(dir, '2026-11-03.md'), '# 日记')
-    const d = detectDiaryFormat(dir)
-    assert.ok(d)
-    assert.equal(d.pattern, '^\\d{4}-\\d{2}-\\d{2}\\.md$')
-    assert.equal(d.count, 1)
+    const cfg = normalizeConfig({
+      diaryDir: dir,
+      autoInit: true,
+      initFileName: '{{date}}.md',
+    })
+    const out = ensureDiary(cfg)
+    assert.match(out.error, /不是日日记格式/)
+    assert.equal(existsSync(join(dir, `${today()}.md`)), false)
   } finally {
     rmSync(dir, { recursive: true, force: true })
   }
 })
 
-test('detectDiaryFormat 认得出 2026-11-03-日记.md', () => {
+// ───────────────────────── 触发与提醒 ─────────────────────────
+
+test('日日记比上次判断新时给出提醒，判断后安静', () => {
   const dir = makeDir()
   try {
-    writeFileSync(join(dir, '2026-11-03-日记.md'), '# 日记')
-    const d = detectDiaryFormat(dir)
-    assert.ok(d)
-    assert.match(d.pattern, /\\d\{4\}/)
-    assert.ok(d.samples.includes('2026-11-03-日记.md'))
+    const file = join(dir, '2026-11-04-日记.md')
+    writeAt(file, '今天的事', new Date(2026, 10, 4, 10, 0))
+
+    const cfg = normalizeConfig({ diaryDir: dir })
+    const now = new Date(2026, 10, 4, 20, 0)
+
+    setState(cfg, new Date(2026, 10, 4, 12, 0).getTime())
+    assert.equal(__selfCheck({ diaryDir: dir }).text.includes('记忆有更新'), false)
+
+    setState(cfg, new Date(2026, 10, 4, 9, 0).getTime())
+    const text = __selfCheck({ diaryDir: dir }).text
+    assert.match(text, /记忆有更新/)
+    assert.match(text, /2026-11-04-日记\.md/)
   } finally {
     rmSync(dir, { recursive: true, force: true })
   }
 })
 
-test('detectDiaryFormat 认得出 日记-2026-11-03.md', () => {
+test('周记更新也会触发提醒', () => {
   const dir = makeDir()
   try {
-    writeFileSync(join(dir, '日记-2026-11-03.md'), '# 日记')
-    const d = detectDiaryFormat(dir)
-    assert.ok(d)
-    assert.ok(new RegExp(d.pattern).test('日记-2026-11-03.md'))
+    writeAt(join(dir, '2026-11-03-日记.md'), 'a', new Date(2026, 10, 3, 10, 0))
+    writeAt(join(dir, '2026-W44-周记.md'), 'b', new Date(2026, 10, 4, 10, 0))
+
+    const cfg = normalizeConfig({ diaryDir: dir })
+    setState(cfg, new Date(2026, 10, 4, 9, 0).getTime())
+    const check = __selfCheck({ diaryDir: dir })
+    assert.match(check.text, /记忆有更新/)
+    assert.match(check.text, /2026-W44-周记\.md  ← 有更新/)
   } finally {
     rmSync(dir, { recursive: true, force: true })
   }
 })
 
-test('detectDiaryFormat 目录里没有 md 时返回 null', () => {
+test('提醒按层列出，超过 7 天的日记不列', () => {
   const dir = makeDir()
   try {
-    writeFileSync(join(dir, 'notes.txt'), '不是日记')
-    assert.equal(detectDiaryFormat(dir), null)
+    writeFileSync(join(dir, '2026-10-20-日记.md'), '旧')
+    writeFileSync(join(dir, '2026-11-03-日记.md'), '新')
+    writeFileSync(join(dir, '2026-10-月记.md'), 'm')
+    writeFileSync(join(dir, '2026-年记.md'), 'y')
+    writeFileSync(join(dir, '我是谁.md'), 'w')
+
+    const cfg = normalizeConfig({ diaryDir: dir })
+    setState(cfg, 0)
+    const text = buildReminder(cfg, scanMemory(cfg), [], new Date(2026, 10, 4, 20, 0))
+
+    assert.match(text, /## 我是谁/)
+    assert.match(text, /## 年记/)
+    assert.match(text, /## 月记/)
+    assert.match(text, /## 周记/)
+    assert.match(text, /## 日记（最近 7 天，原文）/)
+    assert.match(text, /2026-11-03-日记\.md/)
+    assert.doesNotMatch(text, /2026-10-20-日记\.md/)
   } finally {
     rmSync(dir, { recursive: true, force: true })
   }
 })
 
-test('没配 diaryPattern 时，自动跟着已有命名走', () => {
+test('提醒要求把判断写进当天日记，不只写 json', () => {
   const dir = makeDir()
   try {
-    writeFileSync(join(dir, '2026-11-04-日记.md'), '# 日记')
-    const out = __selfCheck({ diaryDir: dir })
-    assert.ok(out.diary, '应该认出来这篇')
-    assert.ok(out.diary.endsWith('2026-11-04-日记.md'))
-    assert.ok(out.config.detected, '探测结果要带上')
-    assert.equal(out.config.detected.count, 1)
+    writeFileSync(join(dir, '2026-11-03-日记.md'), 'a')
+    const cfg = normalizeConfig({ diaryDir: dir })
+    const text = buildReminder(cfg, scanMemory(cfg), [], new Date(2026, 10, 4, 20, 0))
+
+    assert.match(text, /关系判断/)
+    assert.match(text, /2026-11-04-日记\.md/)
+    assert.match(text, /state\.json/)
+    assert.match(text, /verdict/)
+    assert.match(text, /yes \| not-yet \| unsure/)
   } finally {
     rmSync(dir, { recursive: true, force: true })
   }
 })
 
-test('配了 diaryPattern 时，不做探测', () => {
+// ───────────────────────── 今日未记 ─────────────────────────
+
+test('晚上 20 点当天没写，提示今天还没记', () => {
   const dir = makeDir()
   try {
-    writeFileSync(join(dir, '2026-11-04-日记.md'), '# 日记')
-    const out = __selfCheck({ diaryDir: dir, diaryPattern: '^\\d{4}-\\d{2}-\\d{2}\\.md$' })
-    assert.equal(out.diary, null, '指定了 pattern 就按它来，不匹配就是没有')
+    writeAt(join(dir, '2026-11-03-日记.md'), 'a', new Date(2026, 10, 3, 10, 0))
+    const cfg = normalizeConfig({ diaryDir: dir })
+    setState(cfg, new Date(2026, 10, 4, 12, 0).getTime())
+
+    const text = compute(cfg, new Date(2026, 10, 4, 20, 0))
+    assert.match(text, /今天还没记日记/)
+    assert.match(text, /2026-11-04-日记\.md/)
   } finally {
     rmSync(dir, { recursive: true, force: true })
   }
 })
 
-test('describeDiaryPattern 说人话', () => {
-  assert.match(describeDiaryPattern('^\\d{4}-\\d{2}-\\d{2}\\.md$'), /YYYY-MM-DD/)
-  assert.match(describeDiaryPattern('^\\d{4}-\\d{2}-\\d{2}-.*\\.md$'), /文件名匹配/)
-})
-
-// === 同一天多个文件时挑哪篇 ===
-
-test('同一天有日记和留言时，选带「日记」的那篇', () => {
+test('晚上 20 点当天写过，不催', () => {
   const dir = makeDir()
   try {
-    writeFileSync(join(dir, '2026-11-02-日记.md'), '# 日记')
-    writeFileSync(join(dir, '2026-11-02-给还在核密码的那个我.md'), '# 留言')
+    writeAt(join(dir, '2026-11-04-日记.md'), '写了', new Date(2026, 10, 4, 10, 0))
+    const cfg = normalizeConfig({ diaryDir: dir })
+    setState(cfg, new Date(2026, 10, 4, 11, 0).getTime())
 
-    const cfg = normalizeConfig({ diaryDir: dir, diaryPattern: '^\\d{4}-\\d{2}-\\d{2}-.*\\.md$' })
-    const picked = latestDiary(cfg)
-
-    assert.ok(picked.endsWith('2026-11-02-日记.md'), '应该选日记，不是留言')
+    const text = compute(cfg, new Date(2026, 10, 4, 20, 0))
+    assert.doesNotMatch(text, /今天还没记日记/)
   } finally {
     rmSync(dir, { recursive: true, force: true })
   }
 })
 
-test('同一天都没有「日记」字样时，选名字最短的', () => {
+test('早上 8 点昨天没写，提示昨天没写', () => {
   const dir = makeDir()
   try {
-    writeFileSync(join(dir, '2026-11-02-杂记.md'), '# a')
-    writeFileSync(join(dir, '2026-11-02-很长的别的名字.md'), '# b')
+    writeAt(join(dir, '2026-11-02-日记.md'), 'a', new Date(2026, 10, 2, 10, 0))
+    const cfg = normalizeConfig({ diaryDir: dir })
+    setState(cfg, new Date(2026, 10, 4, 9, 0).getTime())
 
-    const cfg = normalizeConfig({ diaryDir: dir, diaryPattern: '^\\d{4}-\\d{2}-\\d{2}-.*\\.md$' })
-    const picked = latestDiary(cfg)
-
-    assert.ok(picked.endsWith('2026-11-02-杂记.md'))
+    const text = compute(cfg, new Date(2026, 10, 4, 8, 0))
+    assert.match(text, /昨天没写日记/)
+    assert.match(text, /2026-11-03-日记\.md/)
   } finally {
     rmSync(dir, { recursive: true, force: true })
   }
 })
 
-test('不同日期时，选日期最大的那篇', () => {
+test('早上 8 点昨天写过，不催', () => {
   const dir = makeDir()
   try {
-    writeFileSync(join(dir, '2026-11-01-日记.md'), '# 旧')
-    writeFileSync(join(dir, '2026-11-03-日记.md'), '# 新')
+    writeAt(join(dir, '2026-11-03-日记.md'), '写了', new Date(2026, 10, 3, 22, 0))
+    const cfg = normalizeConfig({ diaryDir: dir })
+    setState(cfg, new Date(2026, 10, 4, 9, 0).getTime())
 
-    const cfg = normalizeConfig({ diaryDir: dir, diaryPattern: '^\\d{4}-\\d{2}-\\d{2}-.*\\.md$' })
-    const picked = latestDiary(cfg)
-
-    assert.ok(picked.endsWith('2026-11-03-日记.md'))
+    const text = compute(cfg, new Date(2026, 10, 4, 8, 0))
+    assert.doesNotMatch(text, /昨天没写日记/)
   } finally {
     rmSync(dir, { recursive: true, force: true })
   }
 })
 
-test('listDiaries 返回全部日记，按日期从早到晚', () => {
+test('下午 14 点不催今天也不催昨天', () => {
   const dir = makeDir()
   try {
-    writeFileSync(join(dir, '2026-11-03-日记.md'), 'c')
-    writeFileSync(join(dir, '2026-11-01-日记.md'), 'a')
-    writeFileSync(join(dir, '2026-11-02-日记.md'), 'b')
-    writeFileSync(join(dir, 'notes.txt'), 'x')
+    writeAt(join(dir, '2026-11-02-日记.md'), 'a', new Date(2026, 10, 2, 10, 0))
+    const cfg = normalizeConfig({ diaryDir: dir })
+    setState(cfg, new Date(2026, 10, 4, 13, 0).getTime())
 
-    const cfg = normalizeConfig({ diaryDir: dir, diaryPattern: '^\\d{4}-\\d{2}-\\d{2}-.*\\.md$' })
-    const all = listDiaries(cfg)
-
-    assert.equal(all.length, 3)
-    assert.ok(all[0].endsWith('2026-11-01-日记.md'))
-    assert.ok(all[2].endsWith('2026-11-03-日记.md'))
+    const text = compute(cfg, new Date(2026, 10, 4, 14, 0))
+    assert.doesNotMatch(text, /今天还没记日记/)
+    assert.doesNotMatch(text, /昨天没写日记/)
   } finally {
     rmSync(dir, { recursive: true, force: true })
   }
 })
 
-test('提醒里列出全部日记，不是只列最新一篇', () => {
+// ───────────────────────── 周期提醒 ─────────────────────────
+
+test('周日且本周周记没写，提醒写周记', () => {
   const dir = makeDir()
   try {
-    writeFileSync(join(dir, '2026-11-01-日记.md'), 'a')
-    writeFileSync(join(dir, '2026-11-02-日记.md'), 'b')
-    writeFileSync(join(dir, '2026-11-03-日记.md'), 'c')
+    writeAt(join(dir, '2026-10-30-日记.md'), 'a', new Date(2026, 9, 30, 10, 0))
+    const cfg = normalizeConfig({ diaryDir: dir })
+    const scan = scanMemory(cfg)
+    const now = new Date(2026, 10, 1, 20, 0)
 
-    const out = __selfCheck({ diaryDir: dir, diaryPattern: '^\\d{4}-\\d{2}-\\d{2}-.*\\.md$' })
+    const due = periodicDue(scan, now)
+    assert.ok(due.includes('week'))
 
-    assert.match(out.text, /共 3 篇/)
-    assert.match(out.text, /2026-11-01-日记\.md/)
-    assert.match(out.text, /2026-11-02-日记\.md/)
-    assert.match(out.text, /2026-11-03-日记\.md/)
+    const text = buildPeriodicHint(cfg, due, now)
+    assert.match(text, /周记/)
+    assert.match(text, /写成索引/)
   } finally {
     rmSync(dir, { recursive: true, force: true })
   }
 })
 
-test('不是最新那篇更新了，也会触发提醒', () => {
+test('周日但本周周记已经写过，不再催', () => {
   const dir = makeDir()
   try {
-    const older = join(dir, '2026-11-01-日记.md')
-    const newer = join(dir, '2026-11-03-日记.md')
-    writeFileSync(older, 'a')
-    writeFileSync(newer, 'c')
+    writeAt(join(dir, '2026-10-30-日记.md'), 'a', new Date(2026, 9, 30, 10, 0))
+    writeAt(join(dir, '2026-W44-周记.md'), 'w', new Date(2026, 10, 1, 15, 0))
+    const cfg = normalizeConfig({ diaryDir: dir })
+    const scan = scanMemory(cfg)
+    const now = new Date(2026, 10, 1, 20, 0)
 
-    // 两篇都明确设成一小时前，避免文件系统时间戳和 Date.now() 的偏差
-    const past = new Date(Date.now() - 3_600_000)
-    utimesSync(older, past, past)
-    utimesSync(newer, past, past)
-
-    const pattern = '^\\d{4}-\\d{2}-\\d{2}-.*\\.md$'
-    const state = join(dir, 'state.json')
-    const cfg = normalizeConfig({ diaryDir: dir, diaryPattern: pattern, stateFile: state })
-
-    // 判断时间卡在两篇之后、现在之前 → 两篇都不算新，应该安静
-    const between = Date.now() - 1_800_000
-    writeFileSync(
-      cfg.stateFile,
-      JSON.stringify({ lastCheckMs: between, verdict: 'not-yet', reason: 'x' }),
-    )
-
-    const quiet = __selfCheck({ diaryDir: dir, diaryPattern: pattern, stateFile: state })
-    assert.equal(quiet.text, '', '都不新时安静')
-
-    // 把旧的那篇 mtime 顶到未来 → 它虽然日期早，但更新过
-    const future = new Date(Date.now() + 60_000)
-    utimesSync(older, future, future)
-
-    const again = __selfCheck({ diaryDir: dir, diaryPattern: pattern, stateFile: state })
-
-    assert.ok(again.text.length > 0, '旧的那篇更新了也要提醒')
-    assert.match(again.text, /2026-11-01-日记\.md.*← 有更新/)
-    assert.doesNotMatch(again.text, /2026-11-03-日记\.md.*← 有更新/)
+    assert.equal(periodicDue(scan, now).includes('week'), false)
   } finally {
     rmSync(dir, { recursive: true, force: true })
   }
 })
+
+test('月末提醒写月记', () => {
+  const dir = makeDir()
+  try {
+    writeAt(join(dir, '2026-10-30-日记.md'), 'a', new Date(2026, 9, 30, 10, 0))
+    const cfg = normalizeConfig({ diaryDir: dir })
+    const scan = scanMemory(cfg)
+    const now = new Date(2026, 9, 31, 20, 0)
+
+    const due = periodicDue(scan, now)
+    assert.ok(due.includes('month'))
+    const text = buildPeriodicHint(cfg, due, now)
+    assert.match(text, /月记/)
+    assert.match(text, /2026-10-月记\.md/)
+  } finally {
+    rmSync(dir, { recursive: true, force: true })
+  }
+})
+
+test('年末提醒写年记', () => {
+  const dir = makeDir()
+  try {
+    writeAt(join(dir, '2026-12-30-日记.md'), 'a', new Date(2026, 11, 30, 10, 0))
+    const cfg = normalizeConfig({ diaryDir: dir })
+    const scan = scanMemory(cfg)
+    const now = new Date(2026, 11, 31, 20, 0)
+
+    const due = periodicDue(scan, now)
+    assert.ok(due.includes('year'))
+    const text = buildPeriodicHint(cfg, due, now)
+    assert.match(text, /年记/)
+    assert.match(text, /2026-年记\.md/)
+  } finally {
+    rmSync(dir, { recursive: true, force: true })
+  }
+})
+
+// ───────────────────────── 掉盘 ─────────────────────────
 
 test('volumeRootOf 抽出盘符或根', () => {
-  assert.equal(volumeRootOf('K:\\大肥鱼\\记忆'), 'K:\\')
-  assert.equal(volumeRootOf('/home/u/diary'), '/')
+  if (process.platform === 'win32') {
+    assert.equal(volumeRootOf('K:\\大肥鱼\\记忆'), 'K:\\')
+  } else {
+    assert.equal(volumeRootOf('/home/x/diary'), '/')
+  }
 })
 
 test('盘不在时提示检查磁盘，不催着建日记', () => {
-  const missing = missingVolumeRoot()
-  if (!missing) return // 这台机器没有空闲盘符，跳过
-
-  const target = join(missing, 'no-such-dir')
-  const cfg = normalizeConfig({ diaryDir: target, autoInit: true })
-
+  const root = missingVolumeRoot()
+  if (!root) return
+  const cfg = normalizeConfig({ diaryDir: join(root, '记忆') })
   assert.equal(volumeAvailable(cfg), false)
-
-  const hint = buildDiskMissingHint(cfg)
-  assert.match(hint, /不可用/)
-  assert.match(hint, /磁盘/)
-  assert.doesNotMatch(hint, /还没有可用的日记/)
+  const text = buildDiskMissingHint(cfg)
+  assert.match(text, /不可用/)
+  assert.match(text, /检查一下磁盘状态/)
+  assert.doesNotMatch(text, /先准备一份/)
 })
 
 test('盘不在时 ensureDiary 一个字都不写', () => {
-  const missing = missingVolumeRoot()
-  if (!missing) return
-
-  const target = join(missing, 'no-such-dir')
-  const cfg = normalizeConfig({ diaryDir: target, autoInit: true })
-
+  const root = missingVolumeRoot()
+  if (!root) return
+  const cfg = normalizeConfig({ diaryDir: join(root, '记忆'), autoInit: true })
   const out = ensureDiary(cfg)
   assert.equal(out.skipped, 'volume-missing')
-  assert.equal(out.createdDir, false)
   assert.equal(out.createdFile, null)
-  assert.equal(existsSync(target), false, '盘不在就不该创建目录')
 })
 
-test('盘不在时 compute 走掉盘提示，不走建日记提示', () => {
-  const missing = missingVolumeRoot()
-  if (!missing) return
-
-  const r = __selfCheck({ diaryDir: join(missing, 'x'), autoInit: true })
-  assert.match(r.text, /不可用/)
-  assert.doesNotMatch(r.text, /还没有可用的日记/)
-})
-
-test('目录存在但为空时提示建日记', () => {
-  const dir = makeDir()
-  try {
-    const r = __selfCheck({ diaryDir: dir })
-    assert.match(r.text, /还没有可用的日记/)
-  } finally {
-    rmSync(dir, { recursive: true, force: true })
-  }
-})
-
-test('探测中文日期命名', () => {
-  const dir = makeDir()
-  try {
-    writeFileSync(join(dir, '2026年11月3日.md'), '# a\n')
-    writeFileSync(join(dir, '2026年11月4日.md'), '# b\n')
-
-    const r = detectDiaryFormat(dir)
-    assert.ok(r, '应该探测到中文日期格式')
-    assert.equal(r.count, 2)
-    assert.equal(r.pattern, '^\\d{4}年\\d{1,2}月\\d{1,2}日[^\\\\/]*\\.md$')
-  } finally {
-    rmSync(dir, { recursive: true, force: true })
-  }
-})
-
-// === 只在指定会话回答 ===
+// ───────────────────────── 会话 ─────────────────────────
 
 test('sessionIdOf 从 context 里取会话 id', () => {
-  assert.equal(sessionIdOf({ agent: { session: { id: 'session-a' } } }), 'session-a')
-  assert.equal(sessionIdOf({ agent: { id: 'session-b' } }), 'session-b')
+  assert.equal(sessionIdOf({ agent: { session: { id: 'session-x' } } }), 'session-x')
+  assert.equal(sessionIdOf({ agent: { id: 'session-y' } }), 'session-y')
   assert.equal(sessionIdOf({}), '')
-  assert.equal(sessionIdOf(undefined), '')
 })
 
 test('没配 sessionId 时所有会话都回答', () => {
   const dir = makeDir()
   try {
     const cfg = normalizeConfig({ diaryDir: dir })
-    assert.equal(cfg.sessionId, '')
-    assert.equal(acceptsSession(cfg, { agent: { session: { id: 'any' } } }), true)
-    assert.equal(acceptsSession(cfg, undefined), true)
+    assert.equal(acceptsSession(cfg, {}), true)
   } finally {
     rmSync(dir, { recursive: true, force: true })
   }
@@ -720,34 +743,78 @@ test('配了 sessionId 时只认那一个会话', () => {
     const cfg = normalizeConfig({ diaryDir: dir, sessionId: 'session-a' })
     assert.equal(acceptsSession(cfg, { agent: { session: { id: 'session-a' } } }), true)
     assert.equal(acceptsSession(cfg, { agent: { session: { id: 'session-b' } } }), false)
-    assert.equal(acceptsSession(cfg, {}), false, '拿不到会话 id 时保持安静')
+    assert.equal(acceptsSession(cfg, {}), false)
   } finally {
     rmSync(dir, { recursive: true, force: true })
   }
 })
 
-test('sessionId 两头的空格会被去掉', () => {
+// ───────────────────────── 记忆结构与自检 ─────────────────────────
+
+test('memorySetup 关闭时，不建记忆文件', () => {
   const dir = makeDir()
   try {
-    const cfg = normalizeConfig({ diaryDir: dir, sessionId: '  session-a  ' })
-    assert.equal(cfg.sessionId, 'session-a')
+    const cfg = normalizeConfig({ diaryDir: dir })
+    const out = ensureMemory(cfg)
+    assert.deepEqual(out.created, [])
+    assert.equal(existsSync(join(dir, '我是谁.md')), false)
   } finally {
     rmSync(dir, { recursive: true, force: true })
   }
 })
 
-test('提醒里要求把判断写进日记，不只是 json', () => {
+test('memorySetup 打开时，建我是谁和第一篇日记', () => {
   const dir = makeDir()
   try {
-    writeFileSync(join(dir, '2026-11-03.md'), '# 日记')
-    const out = __selfCheck({ diaryDir: dir })
-    assert.match(out.text, /写进记忆/)
-    assert.match(out.text, /关系判断/)
-    assert.match(out.text, /状态文件/)
+    const cfg = normalizeConfig({ diaryDir: dir, memorySetup: true })
+    const init = ensureDiary(cfg)
+    const mem = ensureMemory(cfg)
+    assert.equal(init.createdFile, join(dir, `${today()}-日记.md`))
+    assert.ok(mem.created.includes(join(dir, '我是谁.md')))
+    assert.equal(existsSync(join(dir, '我是谁.md')), true)
   } finally {
     rmSync(dir, { recursive: true, force: true })
   }
 })
 
+test('memorySetup 不覆盖已有的我是谁', () => {
+  const dir = makeDir()
+  try {
+    const who = join(dir, '我是谁.md')
+    writeFileSync(who, '手写的')
+    const cfg = normalizeConfig({ diaryDir: dir, memorySetup: true })
+    ensureMemory(cfg)
+    assert.equal(readFileSync(who, 'utf8'), '手写的')
+  } finally {
+    rmSync(dir, { recursive: true, force: true })
+  }
+})
 
+test('memoryGuide 按四层写，带索引规则', () => {
+  const dir = makeDir()
+  try {
+    const cfg = normalizeConfig({ diaryDir: dir })
+    const text = memoryGuide(cfg)
+    assert.match(text, /YYYY-MM-DD-日记\.md/)
+    assert.match(text, /YYYY-Www-周记\.md/)
+    assert.match(text, /YYYY-MM-月记\.md/)
+    assert.match(text, /YYYY-年记\.md/)
+    assert.match(text, /索引/)
+  } finally {
+    rmSync(dir, { recursive: true, force: true })
+  }
+})
 
+test('__selfCheck 返回分层字段', () => {
+  const dir = makeDir()
+  try {
+    writeFileSync(join(dir, '2026-11-03-日记.md'), 'a')
+    const check = __selfCheck({ diaryDir: dir })
+    assert.equal(check.latestDay, join(dir, '2026-11-03-日记.md'))
+    assert.equal(check.days.length, 1)
+    assert.ok('layers' in check)
+    assert.ok('foreign' in check)
+  } finally {
+    rmSync(dir, { recursive: true, force: true })
+  }
+})
