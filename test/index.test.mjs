@@ -177,6 +177,67 @@ test('buildReminder 用自定义 questions，并替换 {person}', () => {
   }
 })
 
+test('默认 question 让模型从日记里读关系，不预设', () => {
+  const dir = makeDir()
+  try {
+    const cfg = normalizeConfig({ diaryDir: dir })
+    assert.equal(cfg.question, '我们现在是什么关系')
+    assert.deepEqual(cfg.questions, DEFAULTS.questions)
+    assert.equal(cfg.self, '')
+    assert.equal(cfg.intimateMode, false)
+  } finally {
+    rmSync(dir, { recursive: true, force: true })
+  }
+})
+
+test('没配 self 时要求先确认人称，答案有四个', () => {
+  const dir = makeDir()
+  try {
+    mkdirSync(dir, { recursive: true })
+    const file = join(dir, '2026-11-05-日记.md')
+    writeAt(file, '# 今天\n', new Date())
+    const cfg = normalizeConfig({ diaryDir: dir })
+    const text = buildReminder(cfg, scanMemory(cfg), [file], new Date('2026-11-05T10:00:00'))
+    assert.match(text, /先确认人称/)
+    assert.match(text, /答案有四个/)
+    assert.match(text, /broken/)
+  } finally {
+    rmSync(dir, { recursive: true, force: true })
+  }
+})
+
+test('配了 self 时人称固定，不再让模型猜', () => {
+  const dir = makeDir()
+  try {
+    mkdirSync(dir, { recursive: true })
+    const file = join(dir, '2026-11-05-日记.md')
+    writeAt(file, '# 今天\n', new Date())
+    const cfg = normalizeConfig({ diaryDir: dir, self: '妈妈', person: '儿子' })
+    const text = buildReminder(cfg, scanMemory(cfg), [file], new Date('2026-11-05T10:00:00'))
+    assert.match(text, /你在这段关系里是妈妈，对方是儿子。/)
+    assert.ok(!text.includes('先确认人称'))
+  } finally {
+    rmSync(dir, { recursive: true, force: true })
+  }
+})
+
+test('intimateMode 关闭时没有「不用绕」，打开后才有', () => {
+  const dir = makeDir()
+  try {
+    mkdirSync(dir, { recursive: true })
+    const file = join(dir, '2026-11-05-日记.md')
+    writeAt(file, '# 今天\n', new Date())
+    const off = normalizeConfig({ diaryDir: dir })
+    const on = normalizeConfig({ diaryDir: dir, intimateMode: true })
+    const scan = scanMemory(off)
+    const now = new Date('2026-11-05T10:00:00')
+    assert.ok(!buildReminder(off, scan, [file], now).includes('不用绕'))
+    assert.match(buildReminder(on, scan, [file], now), /不用绕/)
+  } finally {
+    rmSync(dir, { recursive: true, force: true })
+  }
+})
+
 test('mergeConfigSources：YAML 覆盖 JSON，JSON 覆盖默认', () => {
   const merged = mergeConfigSources(
     { diaryDir: 'D:/yaml', question: 'yaml-q' },
