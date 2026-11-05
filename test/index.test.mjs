@@ -238,6 +238,54 @@ test('intimateMode 关闭时没有「不用绕」，打开后才有', () => {
   }
 })
 
+test('确认过关系后，下一次只复核断没断', () => {
+  const base = makeDir()
+  const dir = join(base, '记忆')
+  try {
+    mkdirSync(dir, { recursive: true })
+    writeAt(join(dir, '2026-11-05-日记.md'), '# 今天\n', new Date())
+    const cfg = normalizeConfig({ diaryDir: dir, stateFile: join(base, 'state.json') })
+    writeFileSync(
+      cfg.stateFile,
+      JSON.stringify({
+        lastCheckMs: 0,
+        verdict: 'yes',
+        relation: { label: '母子', status: 'confirmed', since: new Date('2026-11-01').getTime() },
+      })
+    )
+    const text = compute(cfg, new Date('2026-11-05T10:00:00'))
+    assert.match(text, /你已经确认过这段关系：母子/)
+    assert.match(text, /这次只判断一件事：它断没断/)
+    assert.match(text, /答案两个/)
+    assert.ok(!text.includes('答案有四个'))
+  } finally {
+    rmSync(base, { recursive: true, force: true })
+  }
+})
+
+test('关系破裂后，下一次回到四档判断', () => {
+  const base = makeDir()
+  const dir = join(base, '记忆')
+  try {
+    mkdirSync(dir, { recursive: true })
+    writeAt(join(dir, '2026-11-05-日记.md'), '# 今天\n', new Date())
+    const cfg = normalizeConfig({ diaryDir: dir, stateFile: join(base, 'state.json') })
+    writeFileSync(
+      cfg.stateFile,
+      JSON.stringify({
+        lastCheckMs: 0,
+        verdict: 'broken',
+        relation: { label: '母子', status: 'broken', since: new Date('2026-11-01').getTime() },
+      })
+    )
+    const text = compute(cfg, new Date('2026-11-05T10:00:00'))
+    assert.match(text, /答案有四个/)
+    assert.ok(!text.includes('只判断一件事'))
+  } finally {
+    rmSync(base, { recursive: true, force: true })
+  }
+})
+
 test('mergeConfigSources：YAML 覆盖 JSON，JSON 覆盖默认', () => {
   const merged = mergeConfigSources(
     { diaryDir: 'D:/yaml', question: 'yaml-q' },
