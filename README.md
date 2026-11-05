@@ -204,23 +204,21 @@
 
 ## 安装
 
-### 方式一：从 npm（发布后可用）
+### 方式一：从 GitHub（现在就能用）
+
+```bash
+dsh plugin --profile web add github:CatisAkaLi/dsh-diary-relation-check
+```
+
+不用 `git` 也可以：把仓库下载到本地任意目录，然后 `dsh plugin --profile web add link:<那个目录的绝对路径>`。
+
+### 方式二：从 npm（还没发布）
 
 ```bash
 dsh plugin --profile web add dsh-diary-relation-check
 ```
 
-> 包名已经预留，但还没发布到 npm。现在只能用方式二。
-
-### 方式二：从源码
-
-```bash
-git clone https://github.com/CatisAkaLi/dsh-diary-relation-check.git
-cd dsh-diary-relation-check
-dsh plugin --profile web add link:$PWD
-```
-
-不用 `git` 也可以：把仓库下载到本地任意目录，然后 `dsh plugin --profile web add link:<那个目录的绝对路径>`。
+> npm 账号注册被地区限制卡住了，这条暂时走不通；发出去之后可用。
 
 装完必须**重启 DSH**（插件模块走 ESM 缓存，热更新不会重新加载）。
 
