@@ -525,18 +525,19 @@ test('提醒按层列出，超过 7 天的日记不列', () => {
   }
 })
 
-test('提醒要求把判断写进当天日记，不只写 json', () => {
+test('提醒只要求写状态文件，不要求写日记，且要求独立判断', () => {
   const dir = makeDir()
   try {
     writeFileSync(join(dir, '2026-11-03-日记.md'), 'a')
     const cfg = normalizeConfig({ diaryDir: dir })
     const text = buildReminder(cfg, scanMemory(cfg), [], new Date(2026, 10, 4, 20, 0))
 
-    assert.match(text, /关系判断/)
-    assert.match(text, /2026-11-04-日记\.md/)
     assert.match(text, /state\.json/)
     assert.match(text, /verdict/)
-    assert.match(text, /yes \| not-yet \| unsure/)
+    assert.match(text, /not-yet/)
+    assert.match(text, /不要把判断写进日记/)
+    assert.match(text, /不要沿用/)
+    assert.doesNotMatch(text, /在当天日记的末尾追加/)
   } finally {
     rmSync(dir, { recursive: true, force: true })
   }
