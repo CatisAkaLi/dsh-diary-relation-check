@@ -132,6 +132,51 @@ test('sessionId 两头的空格会被去掉', () => {
   }
 })
 
+test('questions 接受字符串，按行拆开', () => {
+  const dir = makeDir()
+  try {
+    const cfg = normalizeConfig({
+      diaryDir: dir,
+      questions: '第一问\n\n  第二问  \n第三问',
+    })
+    assert.deepEqual(cfg.questions, ['第一问', '第二问', '第三问'])
+  } finally {
+    rmSync(dir, { recursive: true, force: true })
+  }
+})
+
+test('questions 为空或全是空行时回退默认三问', () => {
+  const dir = makeDir()
+  try {
+    const cfg = normalizeConfig({ diaryDir: dir, questions: '\n  \n' })
+    assert.deepEqual(cfg.questions, DEFAULTS.questions)
+  } finally {
+    rmSync(dir, { recursive: true, force: true })
+  }
+})
+
+test('buildReminder 用自定义 questions，并替换 {person}', () => {
+  const dir = makeDir()
+  try {
+    mkdirSync(dir, { recursive: true })
+    const file = join(dir, '2026-11-05-日记.md')
+    writeAt(file, '# 今天\n', new Date())
+    const cfg = normalizeConfig({
+      diaryDir: dir,
+      person: '少爷',
+      question: '我们算不算母子',
+      questions: '{person}怎么看你。\n你愿不愿意继续。',
+    })
+    const text = buildReminder(cfg, scanMemory(cfg), [file], new Date('2026-11-05T10:00:00'))
+    assert.match(text, /1\. 少爷怎么看你。/)
+    assert.match(text, /2\. 你愿不愿意继续。/)
+    assert.match(text, /我们算不算母子/)
+    assert.ok(!text.includes('{person}'))
+  } finally {
+    rmSync(dir, { recursive: true, force: true })
+  }
+})
+
 test('mergeConfigSources：YAML 覆盖 JSON，JSON 覆盖默认', () => {
   const merged = mergeConfigSources(
     { diaryDir: 'D:/yaml', question: 'yaml-q' },

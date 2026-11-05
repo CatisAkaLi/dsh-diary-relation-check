@@ -2,7 +2,7 @@
   "manifestVersion": "0.15",
   "id": "dsh-diary-relation-check",
   "name": "dsh-diary-relation-check",
-  "version": "0.10.0",
+  "version": "0.10.2",
   "license": "MIT",
   "description": "记忆按日/周/月/年分层，更新时提醒模型按层读一遍、独立复盘一段关系并给出理由；判断只写状态文件，不写进日记",
   "facets": {
@@ -16,7 +16,7 @@
     "x-display": [
       {
         "title": "dsh-diary-relation-check",
-        "description": "记忆按日/周/月/年分层，一有更新就在系统提示里按层列出来；判断只写状态文件，不写进日记；配了 sessionId 就只在那一个会话里出现"
+        "description": "记忆按日/周/月/年分层，一有更新就在系统提示里按层列出来；关系类型和判断问题都可以配置，不限于情侣；配了 sessionId 就只在那一个会话里出现"
       }
     ]
   }
