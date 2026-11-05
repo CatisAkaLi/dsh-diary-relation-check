@@ -231,8 +231,8 @@ test('intimateMode 关闭时没有「不用绕」，打开后才有', () => {
     const on = normalizeConfig({ diaryDir: dir, intimateMode: true })
     const scan = scanMemory(off)
     const now = new Date('2026-11-05T10:00:00')
-    assert.ok(!buildReminder(off, scan, [file], now).includes('不用绕'))
-    assert.match(buildReminder(on, scan, [file], now), /不用绕/)
+    assert.ok(!buildReminder(off, scan, [file], now).includes('关系判断场景的写作规则'))
+    assert.match(buildReminder(on, scan, [file], now), /关系判断场景的写作规则/)
   } finally {
     rmSync(dir, { recursive: true, force: true })
   }
