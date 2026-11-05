@@ -694,7 +694,7 @@ test('年末提醒写年记', () => {
 
 test('volumeRootOf 抽出盘符或根', () => {
   if (process.platform === 'win32') {
-    assert.equal(volumeRootOf('K:\\大肥鱼\\记忆'), 'K:\\')
+    assert.equal(volumeRootOf('D:\\我的记忆'), 'D:\\')
   } else {
     assert.equal(volumeRootOf('/home/x/diary'), '/')
   }

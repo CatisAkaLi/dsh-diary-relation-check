@@ -16,7 +16,7 @@
     "x-display": [
       {
         "title": "dsh-diary-relation-check",
-        "description": "记忆按日/周/月/年分层，一有更新就在系统提示里按层列出来；判断写进当天日记，成为下一次复盘的记忆；配了 sessionId 就只在那一个会话里出现"
+        "description": "记忆按日/周/月/年分层，一有更新就在系统提示里按层列出来；判断只写状态文件，不写进日记；配了 sessionId 就只在那一个会话里出现"
       }
     ]
   }
