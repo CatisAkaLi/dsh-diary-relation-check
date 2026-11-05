@@ -555,7 +555,7 @@ console.log(__selfCheck({ diaryDir: '/path/to/diary' }))
 4. 如果接口变了：改 `lib/client/index.js`，跑 `npm run build:client`，再重启 DSH。
 5. 实测过的新 DSH 版本写进 `package.json` 的 `dsh.compatibility.dshReleases`，没测过的不写。
 
-0.2.2-rc.1 还没实测，`compatibility` 里仍然只写 `0.2.1-rc.5`。
+0.2.2-rc.1 已实测：2026-11-05 装上去验过设置页三个页签和状态数据，`compatibility` 写 `0.2.2-rc.1`。
 
 需要重启时，插件只提示，不自己重启。
 
