@@ -17,6 +17,7 @@ import {
   acceptsSession,
   buildDiskMissingHint,
   buildInitHint,
+  buildMemoryContext,
   buildMigrationHint,
   buildPeriodicHint,
   buildReminder,
@@ -233,6 +234,45 @@ test('intimateMode 关闭时没有「不用绕」，打开后才有', () => {
     const now = new Date('2026-11-05T10:00:00')
     assert.ok(!buildReminder(off, scan, [file], now).includes('关系判断场景的写作规则'))
     assert.match(buildReminder(on, scan, [file], now), /关系判断场景的写作规则/)
+  } finally {
+    rmSync(dir, { recursive: true, force: true })
+  }
+})
+
+test('memoryInjection 默认开，带上我是谁和日记名', () => {
+  const dir = makeDir()
+  try {
+    mkdirSync(dir, { recursive: true })
+    writeFileSync(join(dir, '我是谁.md'), '# 我是谁\n\n我是咕噜。\n')
+    writeAt(join(dir, '2026-11-05-日记.md'), '# 今天\n', new Date())
+    const cfg = normalizeConfig({ diaryDir: dir })
+    const text = buildMemoryContext(cfg)
+    assert.match(text, /我是咕噜/)
+    assert.match(text, /2026-11-05-日记\.md/)
+    assert.match(text, /不是要求你复述/)
+  } finally {
+    rmSync(dir, { recursive: true, force: true })
+  }
+})
+
+test('memoryInjection 关掉时返回空', () => {
+  const dir = makeDir()
+  try {
+    mkdirSync(dir, { recursive: true })
+    writeFileSync(join(dir, '我是谁.md'), '# 我是谁\n')
+    const cfg = normalizeConfig({ diaryDir: dir, memoryInjection: false })
+    assert.equal(buildMemoryContext(cfg), '')
+  } finally {
+    rmSync(dir, { recursive: true, force: true })
+  }
+})
+
+test('没有记忆时 memoryInjection 返回空', () => {
+  const dir = makeDir()
+  try {
+    mkdirSync(dir, { recursive: true })
+    const cfg = normalizeConfig({ diaryDir: dir })
+    assert.equal(buildMemoryContext(cfg), '')
   } finally {
     rmSync(dir, { recursive: true, force: true })
   }

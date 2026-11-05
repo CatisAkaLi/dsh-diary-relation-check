@@ -100,6 +100,8 @@
 任意一篇记忆 mtime  ≤  state.lastCheckMs   →   不提醒
 ```
 
+**每轮还带一份记忆背景。** 除了上面的判断提醒，插件每轮对话都往系统提示里放一份「我是谁」全文和最近 7 天的日记文件名（不读正文，要读自己打开）。内容是背景，不是要求复述。这部分和判断无关，判断关掉了它也在，可以用 `memoryInjection: false` 关掉。按一页「我是谁」加七个文件名算，每轮大约 1400 token，占 1M 窗口的 0.14%。
+
 状态文件默认落在记忆目录外面（`<diaryDir 的父目录>/.dsh-diary-relation-check/state.json`），不混进记忆文件夹。长这样：
 
 ```json
@@ -296,6 +298,7 @@ npm run build:client
 | `person` | 否 | `ta` | 提醒里指代对方的词 |
 | `self` | 否 | 空（让模型从日记里认） | 你自己在这段关系里的角色，比如「妈妈」「主人」。填了就固定，不再让模型猜 |
 | `intimateMode` | 否 | `false` | 亲密模式，手动开关，见下 |
+| `memoryInjection` | 否 | `true` | 每轮带上「我是谁」和最近 7 天日记文件名 |
 | `cacheMs` | 否 | `30000` | 提醒文本缓存时长 |
 | `order` | 否 | `900` | 注入的 prompt section 顺序 |
 | `autoInit` | 否 | `false` | 没有日日记时，自动建目录和第一篇 |

@@ -53,8 +53,10 @@ test('systemPrompt 服务一直不来时 apply 不抛', () => {
   }
 })
 
-test('缺 diaryDir 时 apply 只打一行错误，不抛', () => {
-  assert.doesNotThrow(() => apply({}, {}))
+test('缺 diaryDir 时 apply 只打一行错误，不抛', async () => {
+  await withHome(async () => {
+    assert.doesNotThrow(() => apply({}, {}))
+  })
 })
 
 test('config.json 损坏时 apply 不崩，status 仍可用', async () => {
