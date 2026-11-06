@@ -2,7 +2,7 @@
   "manifestVersion": "0.15",
   "id": "dsh-diary-relation-check",
   "name": "dsh-diary-relation-check",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "license": "MIT",
   "description": "记忆按日/周/月/年分层，更新时提醒模型按层读一遍、独立复盘一段关系并给出理由；判断只写状态文件，不写进日记",
   "facets": {

@@ -212,6 +212,8 @@ dsh plugin --profile web add github:CatisAkaLi/dsh-diary-relation-check
 
 不用 `git` 也可以：把仓库下载到本地任意目录，然后 `dsh plugin --profile web add link:<那个目录的绝对路径>`。
 
+> 机器上没有装 git 的话，上面 `github:` 那条会失败（它要用 git 解析仓库），直接用下载 + `link:` 的方式。
+
 装完必须**重启 DSH**（插件模块走 ESM 缓存，热更新不会重新加载）。
 
 装完还要**加配置**——插件不知道你的记忆在哪，`diaryDir` 是必填项，不填会在日志里报错并且不工作。见下一节。

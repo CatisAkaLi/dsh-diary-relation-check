@@ -239,6 +239,30 @@ test('intimateMode 关闭时没有「不用绕」，打开后才有', () => {
   }
 })
 
+test('没有记忆时的提示用当天日期，不写死', () => {
+  const dir = makeDir()
+  try {
+    mkdirSync(dir, { recursive: true })
+    const cfg = normalizeConfig({ diaryDir: dir })
+    const text = buildInitHint(cfg, new Date('2026-11-06T10:00:00'))
+    assert.match(text, /2026-11-06-日记\.md/)
+    assert.match(text, /2026-W45-周记\.md/)
+    assert.ok(!text.includes('2026-11-04'), '不该再出现写死的示例日期')
+  } finally {
+    rmSync(dir, { recursive: true, force: true })
+  }
+})
+
+test('intimateMode 字符串 "true" 也认', () => {
+  const dir = makeDir()
+  try {
+    const cfg = normalizeConfig({ diaryDir: dir, intimateMode: 'true' })
+    assert.equal(cfg.intimateMode, true)
+  } finally {
+    rmSync(dir, { recursive: true, force: true })
+  }
+})
+
 test('memoryInjection 默认开，带上我是谁和日记名', () => {
   const dir = makeDir()
   try {
@@ -580,7 +604,7 @@ test('空目录给出初始化提示，写清新格式', () => {
   try {
     const cfg = normalizeConfig({ diaryDir: dir })
     const text = buildInitHint(cfg)
-    assert.match(text, /2026-11-04-日记\.md/)
+    assert.ok(text.includes(`${dateStr()}-日记.md`), '应该给今天的文件名')
     assert.match(text, /周记/)
     assert.match(text, /月记/)
     assert.match(text, /年记/)
