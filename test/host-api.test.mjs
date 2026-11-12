@@ -8,19 +8,28 @@ import { apply } from '../lib/index.js'
 
 function fakeCtx() {
   const routes = []
-  const sections = []
+  const byPath = new Map()
   const ctx = {
     routes,
-    sections,
+    sections: [],
     connection: {
+      // DSH 的 HostConnectionService 拿这个字段认服务实例，插件用同一招。
+      browserPeer: {},
       fetch: {
-        register: (route) => routes.push(route),
+        // 按真实 DSH 的规矩来：route 表按 path 唯一，重复注册直接抛。
+        register: (route) => {
+          if (byPath.has(route.path)) {
+            throw new Error(`connection: exact Fetch route ${JSON.stringify(route.path)} is already registered`)
+          }
+          byPath.set(route.path, route)
+          routes.push(route)
+        },
       },
     },
     inject(deps, fn) {
       const scope = {}
       if (deps.includes('connection')) scope.connection = ctx.connection
-      if (deps.includes('systemPrompt')) scope.systemPrompt = { section: (section) => sections.push(section) }
+      if (deps.includes('systemPrompt')) scope.systemPrompt = { section: (section) => ctx.sections.push(section) }
       fn(scope)
     },
   }
@@ -216,7 +225,7 @@ test('200 篇日记的 status 在 2 秒内返回', async () => {
   })
 })
 
-test('重复 apply 不崩', async () => {
+test('重复 apply 不崩，route 表里每个 path 只有一份', async () => {
   await withHome(async () => {
     const dir = mkdtempSync(join(tmpdir(), 'relation-twice-'))
     try {
@@ -225,8 +234,59 @@ test('重复 apply 不崩', async () => {
         apply(ctx, { diaryDir: dir })
         apply(ctx, { diaryDir: dir })
       })
+
+      const paths = ctx.routes.map((route) => route.path)
+      assert.equal(new Set(paths).size, paths.length, `有 path 被注册了两次：${paths.join(', ')}`)
     } finally {
       rmSync(dir, { recursive: true, force: true })
+    }
+  })
+})
+
+test('config 一个 path 同时接 GET 和 POST', async () => {
+  await withHome(async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'relation-config-'))
+    try {
+      const ctx = fakeCtx()
+      apply(ctx, { diaryDir: dir })
+
+      const matches = ctx.routes.filter((route) => route.path.endsWith('/config'))
+      assert.equal(matches.length, 1, 'config 该只注册一个 route')
+      assert.deepEqual([...matches[0].methods].sort(), ['GET', 'POST'])
+
+      const read = await matches[0].fetch(new Request('http://localhost/api/dsh-diary-relation-check/config'))
+      assert.equal((await read.json()).ok, true)
+
+      const write = await matches[0].fetch(
+        new Request('http://localhost/api/dsh-diary-relation-check/config', {
+          method: 'POST',
+          headers: { 'content-type': 'application/json', origin: 'http://127.0.0.1:54321' },
+          body: JSON.stringify({ question: '一条 route 两种方法' }),
+        })
+      )
+      assert.equal(write.status, 200)
+    } finally {
+      rmSync(dir, { recursive: true, force: true })
+    }
+  })
+})
+
+test('后装的实例不再抢同一张 route 表', async () => {
+  await withHome(async () => {
+    const one = mkdtempSync(join(tmpdir(), 'relation-a-'))
+    const two = mkdtempSync(join(tmpdir(), 'relation-b-'))
+    try {
+      const first = fakeCtx()
+      apply(first, { diaryDir: one })
+
+      // 第二个实例：同一种 connection 服务，模拟一个包插两条 entry。
+      const second = fakeCtx()
+      second.connection = first.connection
+      assert.doesNotThrow(() => apply(second, { diaryDir: two }))
+      assert.equal(second.routes.length, 0, '第二个实例不该重复注册 route')
+    } finally {
+      rmSync(one, { recursive: true, force: true })
+      rmSync(two, { recursive: true, force: true })
     }
   })
 })

@@ -268,16 +268,16 @@ npm run build:client
 
 ## 配置
 
-在 profile 的 `cordis.patch.yml` 里加一段：
+在 profile 的 `cordis.patch.yml` 里给包自带的那一行补配置：
 
 ```yaml
-- insert:
-    - id: relation-check
-      name: 'dsh-diary-relation-check'
-      config:
-        diaryDir: 'D:\我的记忆'
-        person: 'ta'
+- id: relation-check
+  config:
+    diaryDir: 'D:\我的记忆'
+    person: 'ta'
 ```
+
+`relation-check` 是包自带 bundle patch 里的 entry id，按 id 打补丁就行，**不要再 `insert` 一条**。多插一条会变成第二个实例，两个实例抢同一组 `/api/dsh-diary-relation-check/*` 路由；旧版会报 `connection: exact Fetch route ... is already registered`，新版做了幂等不报错，但设置页只显示第一个实例的配置。
 
 所有配置项：
 
@@ -550,20 +550,7 @@ console.log(__selfCheck({ diaryDir: '/path/to/diary' }))
 
 **能不能同时监控好几个目录？**
 
-不能。一个插件实例一个 `diaryDir`。要监控多个目录，就在 `cordis.patch.yml` 里插两条，用不同的 `id`：
-
-```yaml
-- id: relation-check-work
-  name: dsh-diary-relation-check
-  config:
-    diaryDir: '/path/to/work-notes'
-    question: '这份工作还要不要继续'
-
-- id: relation-check-life
-  name: dsh-diary-relation-check
-  config:
-    diaryDir: '/path/to/diary'
-```
+不能。一个插件实例一个 `diaryDir`。插两条 entry 不会变成两套设置页：路由只有一份，`/status` 和 `/config` 认的是第一个实例，提示注入也只剩最后一条生效。想让它们分开记，只能分到两个 profile 里各跑一份。
 
 **它会读别的文件吗？**
 

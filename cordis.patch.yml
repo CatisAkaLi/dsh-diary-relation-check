@@ -6,13 +6,14 @@
 #   config: 原样传给 apply(root, config)
 #
 # 这里故意不带 config：diaryDir 因人而异，必须由使用者自己填。
-# 在你的 profile 的 cordis.patch.yml 里加：
+# 在你的 profile 的 cordis.patch.yml 里按 id 给这一行补 config：
 #
-#   - insert:
-#       - id: relation-check
-#         name: 'dsh-diary-relation-check'
-#         config:
-#           diaryDir: '/path/to/your/diary'
+#   - id: relation-check
+#     config:
+#       diaryDir: '/path/to/your/diary'
+#
+# 不要用 insert 再加一条：同一个包插两条 entry 会变成两个实例，
+# 抢同一组 /api/dsh-diary-relation-check/* 路由。
 #
 # 不填 diaryDir 插件会打印一行错误然后不注册，不会影响 DSH 启动。
 
